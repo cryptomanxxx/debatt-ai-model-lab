@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "experiment_id": "smollm3-smoketest-38810291221-1",
+  "status": "completed",
+  "source": {
+    "repository": "cryptomanxxx/debatt-ai-model-lab",
+    "git_sha": "10c5c6a9290e78c51a5e623a0529391f6ca7a038",
+    "github_actions_run_id": 38810291221,
+    "run_attempt": 1,
+    "github_actions_url": "https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/38810291221",
+    "artifact_id": 12007783263,
+    "artifact_url": "https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/38810291221/artifacts/12007783263"
+  },
+  "model": {
+    "id": "HuggingFaceTB/SmolLM3-3B",
+    "revision": "1c00fc78bd9cf90108046bc433cb34992480f1c1"
+  },
+  "inference": {
+    "prompt": "Explain in one sentence why reproducible scientific experiments matter.",
+    "response": "Reproducible scientific experiments matter because they ensure that results can be consistently verified and trusted, allowing the scientific community to build upon and validate findings, ultimately advancing knowledge and reducing the risk of errors or misinterpretations.",
+    "generated_tokens": 44,
+    "finish_reason": "eos",
+    "enable_thinking": false,
+    "max_new_tokens": 64,
+    "do_sample": false,
+    "input_sha256": "34daaae6a673015912b12d94c36245252222143f658ea9087e4523e81269851e"
+  },
+  "hardware": {
+    "cuda_available": true,
+    "gpu_name": "Tesla T4",
+    "cuda_runtime_version": "12.8"
+  },
+  "software": {
+    "python_version": "3.13.15",
+    "torch_version": "2.11.0+cu128",
+    "transformers_version": "4.53.3"
+  },
+  "interpretation": {
+    "technical_smoke_test_passed": true,
+    "scientific_quality_benchmark": false,
+    "notes": "Curated, human-readable subset of the original Kaggle output, not the complete environment package inventory or model input tokens. See original GitHub Actions artifact for full source data."
+  }
+}
