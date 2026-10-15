@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-RUNNER = """import os
+RUNNER = """import json
 import subprocess
 from pathlib import Path
 
@@ -18,6 +18,9 @@ subprocess.run(
     ["python", "scripts/smollm3_smoketest.py", "--output", "/kaggle/working/smollm3_smoketest.json"],
     cwd=repo, check=True,
 )
+# Written only after successful experiment execution.
+with open("/kaggle/working/experiment_provenance.json", "w", encoding="utf-8") as fp:
+    json.dump({"git_sha": sha}, fp)
 """
 
 def prepare(sha: str, username: str, output: Path) -> None:
