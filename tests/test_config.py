@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.smollm3_smoketest import load_config, require_cuda
+from scripts.smollm3_smoketest import load_config, require_cuda, validate_generation
 
 
 def test_smoketest_configuration():
@@ -38,3 +38,17 @@ def test_invalid_revision_rejected(tmp_path: Path):
     path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="immutable"):
         load_config(str(path))
+
+def test_completed_generation():
+    assert validate_generation([42, 2], 2, 64, "Valid answer.") == "eos"
+
+
+@pytest.mark.parametrize("ids,response", [([], ""), ([2], ""), ([42, 42], "Unfinished")])
+def test_incomplete_response_rejected(ids, response):
+    with pytest.raises(RuntimeError, match="Smoke test failed"):
+        validate_generation(ids, 2, 2, response)
+
+
+def test_missing_eos_rejected_even_under_budget():
+    with pytest.raises(RuntimeError, match="did not terminate with EOS"):
+        validate_generation([42], 2, 64, "Some text")
