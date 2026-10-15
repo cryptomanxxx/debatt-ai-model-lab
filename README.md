@@ -1,45 +1,40 @@
 # Debatt-AI Model Lab
 
-An open research workspace for reproducible experiments with open-weight language models, including inference, evaluation, training, and fine-tuning.
+An open research workspace for experiments with open-weight language models: inference, evaluation, training, and fine-tuning.
 
 ## First experiment: SmolLM3 smoke test
 
-The initial reproducible baseline runs **inference only** with [HuggingFaceTB/SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B). It checks whether the model can be loaded and generate a response in a GPU-capable environment. It does **not** train a model yet.
+The first baseline runs **GPU-only inference**, not training, with a pinned revision of [HuggingFaceTB/SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B).
 
 ### Layout
 
-- `configs/` — versioned experiment settings
-- `scripts/` — runnable Python experiments
-- `tests/` — fast CI checks that do not download models
+- `configs/` — versioned experiment settings and immutable model revision
+- `scripts/` — runnable experiments
+- `tests/` — CPU-only unit tests
 - `notebooks/` — Kaggle setup instructions
-- `results/` — generated local outputs (do not commit large weights or datasets)
+- `results/` — local experiment JSON output
 - `.github/workflows/` — lightweight CI
 
 ### Run
 
-Use a Python 3.11 environment with sufficient GPU memory:
+Use Python 3.11, an enabled CUDA GPU and adequate memory:
 
 ```bash
 pip install -r requirements.txt
 python scripts/smollm3_smoketest.py
 ```
 
-The script writes a JSON record to `results/smollm3_smoketest.json`. For Kaggle instructions, see [notebooks/README.md](notebooks/README.md).
+The script writes to `results/smollm3_smoketest.json` and fails immediately when CUDA is unavailable. It records the pinned model commit, full rendered prompt (including any date inserted by the template), input token IDs, exact package versions, platform/GPU information and deterministic generation settings. Extended thinking is disabled for this short smoke response.
 
-### CI
+**Environment limitations:** `requirements.txt` pins direct dependencies, but is not a complete transitive lock file. Package metadata in the JSON supports auditing but does not guarantee byte-identical installation across Python platforms or GPU drivers. To obtain stronger reproducibility, capture a full resolved environment/lock from the validated Kaggle runtime before declaring the baseline frozen.
 
-```bash
-pip install pytest
-python -m pytest -q
-```
-
-GitHub Actions checks syntax and configuration without requiring a GPU. A successful CI run **does not** mean Kaggle GPU execution has succeeded.
+See [notebooks/README.md](notebooks/README.md) for Kaggle setup. A successful CI run does **not** prove a GPU smoke test succeeded.
 
 ## Roadmap
 
-1. Reproduce and document the first SmolLM3 inference smoke test.
-2. Add explicit experiment metadata, metrics and artifact handling.
-3. Introduce a small, controlled fine-tuning baseline (e.g. LoRA/QLoRA) and evaluation against the unmodified model.
-4. Automate Kaggle notebook submission and artifact retrieval if supported by account permissions and quotas.
+1. Validate the pinned SmolLM3 inference baseline on Kaggle GPU.
+2. Freeze the verified full environment, report results and evaluation metrics.
+3. Add controlled LoRA/QLoRA fine-tuning and compare with the unmodified model.
+4. Explore automated Kaggle submission and artifact retrieval within access quotas.
 
-Keep credentials in secret managers, not in Git, and document experimental limitations.
+Keep secrets, large model weights and private data out of Git.
