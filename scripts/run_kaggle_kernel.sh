@@ -32,16 +32,26 @@ for i in $(seq 1 100); do
     exit 1
   }
   echo "$status" | tee -a kaggle-results/status.log
-  normalized="$(printf '%s' "$status" | tr '[:upper:]' '[:lower:]')"
-  if echo "$normalized" | grep -Eq 'kernelworkerstatus\\.[a-z_]*(error|fail|cancel)[a-z_]*|status[^a-z]*(error|failed|cancelled|canceled|cancel_acknowledged)'; then
-    echo "::error::Kaggle run failed"
-    kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/output-download.log 2>&1 || true
-    exit 1
-  fi
-  if echo "$normalized" | grep -Eq '(^|[^a-z])complete([^a-z]|$)'; then
-    completed=1
-    break
-  fi
+  # Extract the CLI's quoted worker-status field only. Never match username,
+  # kernel slug or a progress URL that happens to contain "complete".
+  worker_status="$(printf '%s\n' "$status" | grep -Eo 'KernelWorkerStatus\.[A-Z_]+' | head -n 1 || true)"
+  case "$worker_status" in
+    KernelWorkerStatus.COMPLETE)
+      completed=1
+      break
+      ;;
+    KernelWorkerStatus.ERROR|KernelWorkerStatus.FAILED|KernelWorkerStatus.CANCELED|KernelWorkerStatus.CANCELLED|KernelWorkerStatus.CANCEL_ACKNOWLEDGED|KernelWorkerStatus.CANCELLING|KernelWorkerStatus.CANCELING)
+      echo "::error::Kaggle run failed: $worker_status"
+      kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/output-download.log 2>&1 || true
+      exit 1
+      ;;
+    KernelWorkerStatus.QUEUED|KernelWorkerStatus.RUNNING)
+      ;;
+    *)
+      echo "::error::Unknown or missing Kaggle worker status: $status"
+      exit 1
+      ;;
+  esac
   sleep 60
 done
 
