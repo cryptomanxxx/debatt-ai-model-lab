@@ -18,6 +18,7 @@ jobs:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
       KAGGLE_KERNEL_SLUG: debatt-ai-smollm3-gpu
+      EXPERIMENT_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +31,7 @@ jobs:
       - name: Install Kaggle CLI
         run: python -m pip install 'kaggle>=1.7,<2'
       - name: Prepare isolated kernel submission
-        run: python scripts/prepare_kaggle_kernel.py --sha "$GITHUB_SHA" --username "$KAGGLE_USERNAME" --output kaggle-submission
+        run: python scripts/prepare_kaggle_kernel.py --sha "$GITHUB_SHA" --username "$KAGGLE_USERNAME" --run-id "$EXPERIMENT_RUN_ID" --output kaggle-submission
       - name: Submit Kaggle GPU run and retrieve output
         run: bash scripts/run_kaggle_kernel.sh
       - name: Upload experimental artifacts
