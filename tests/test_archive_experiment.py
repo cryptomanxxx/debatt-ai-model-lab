@@ -51,11 +51,26 @@ def test_rejects_wrong_provenance(tmp_path):
         archive(source, tmp_path / "results", "c" * 40, RUN, URL)
 
 
-def test_never_overwrites_existing_run(tmp_path):
+def test_retry_is_idempotent(tmp_path):
     source = fixture(tmp_path)
-    archive(source, tmp_path / "results", SHA, RUN, URL)
-    with pytest.raises(FileExistsError):
+    root = archive(source, tmp_path / "results", SHA, RUN, URL)
+    assert archive(source, tmp_path / "results", SHA, RUN, URL) == root
+
+
+def test_existing_conflicting_record_is_rejected(tmp_path):
+    source = fixture(tmp_path)
+    root = archive(source, tmp_path / "results", SHA, RUN, URL)
+    (root / "result.json").write_text('{"tampered": true}')
+    with pytest.raises(ValueError, match="differs"):
         archive(source, tmp_path / "results", SHA, RUN, URL)
+
+
+def test_retry_uses_existing_directory_across_date_change(tmp_path):
+    source = fixture(tmp_path)
+    root = archive(source, tmp_path / "results", SHA, RUN, URL)
+    earlier = root.with_name("2020-01-01-run-123456-attempt-1")
+    root.rename(earlier)
+    assert archive(source, tmp_path / "results", SHA, RUN, URL) == earlier
 
 
 def test_rejects_incomplete_gpu_result(tmp_path):
