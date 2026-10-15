@@ -88,5 +88,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add results/
           git diff --cached --quiet && { echo "No new results to archive"; exit 0; }
-          git commit -m "data: archive Kaggle experiment ${{ github.run_id }} attempt ${{ github.run_attempt }}"
+          PRODUCER_RUN_ID="$(python -c 'import json; print(json.load(open("../kaggle-results/experiment_provenance.json", encoding="utf-8"))["run_id"])')"
+          git commit -m "data: archive Kaggle experiment ${PRODUCER_RUN_ID}"
           git push origin HEAD:refs/heads/experiment-results
