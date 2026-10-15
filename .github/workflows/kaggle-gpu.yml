@@ -72,11 +72,15 @@ jobs:
           fi
       - name: Validate and format archive
         env:
-          EXPERIMENT_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           SOURCE_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          python scripts/archive_experiment.py --source kaggle-results --destination archive-tree/results --sha "$SOURCE_SHA" --run-id "$EXPERIMENT_RUN_ID" --run-url "$RUN_URL"
+          PRODUCER_RUN_ID="$(python -c 'import json; print(json.load(open("kaggle-results/experiment_provenance.json", encoding="utf-8"))["run_id"])')"
+          case "$PRODUCER_RUN_ID" in
+            "${GITHUB_RUN_ID}-"*) ;;
+            *) echo "::error::Artifact belongs to a different workflow run"; exit 1 ;;
+          esac
+          python scripts/archive_experiment.py --source kaggle-results --destination archive-tree/results --sha "$SOURCE_SHA" --run-id "$PRODUCER_RUN_ID" --run-url "$RUN_URL"
       - name: Commit archive to experiment-results only
         working-directory: archive-tree
         run: |
