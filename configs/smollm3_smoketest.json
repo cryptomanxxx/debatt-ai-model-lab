@@ -1,0 +1,5 @@
+{
+  "model_id": "HuggingFaceTB/SmolLM3-3B",
+  "prompt": "Explain in one sentence why reproducible scientific experiments matter.",
+  "max_new_tokens": 64
+}
