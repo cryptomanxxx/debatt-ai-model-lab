@@ -30,9 +30,6 @@ def archive(source: Path, destination: Path, sha: str, run_id: str, run_url: str
     run_number, attempt = run_id.split("-")
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     root = destination / "smollm3" / f"{date}-run-{run_number}-attempt-{attempt}"
-    if root.exists():
-        raise FileExistsError(f"Archive already exists: {root}")
-    root.mkdir(parents=True)
     record = {
         "schema_version": 1,
         "experiment_id": f"smollm3-smoketest-{run_id}",
@@ -68,7 +65,7 @@ def archive(source: Path, destination: Path, sha: str, run_id: str, run_url: str
             "notes": "CUDA build version is from torch.version.cuda, not the host runtime or driver. Full unfiltered outputs remain in the time-limited GitHub Actions artifact.",
         },
     }
-    (root / "result.json").write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
     report = (
         f"# SmolLM3 GPU smoke test — {run_id}\n\n"
         f"**Outcome:** successful technical test, not a scientific-quality benchmark.\n\n"
@@ -82,6 +79,22 @@ def archive(source: Path, destination: Path, sha: str, run_id: str, run_url: str
         f"## Reproducibility\n\nSee `result.json` for the exact rendered input, model settings and environment metadata. "
         f"The original full artifact is attached to the linked run, subject to GitHub retention.\n"
     )
+    # Search across dates, since a retry can happen after midnight UTC.
+    existing = sorted((destination / "smollm3").glob(f"????-??-??-run-{run_number}-attempt-{attempt}"))
+    if existing:
+        if len(existing) != 1:
+            raise ValueError(f"Multiple archived results found for {run_id}")
+        previous = existing[0]
+        expected_json = json.dumps(record, indent=2, ensure_ascii=False) + "\n"
+        if ((previous / "result.json").is_file()
+                and (previous / "experiment-report.md").is_file()
+                and (previous / "result.json").read_text(encoding="utf-8") == expected_json
+                and (previous / "experiment-report.md").read_text(encoding="utf-8") == report):
+            print(f"Archive already published and identical: {previous}")
+            return previous
+        raise ValueError(f"Archived experiment {run_id} differs from the current result")
+    root.mkdir(parents=True)
+    (root / "result.json").write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (root / "experiment-report.md").write_text(report, encoding="utf-8")
     print(root)
     return root
