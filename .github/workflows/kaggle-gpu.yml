@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 180
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_KERNEL_SLUG: debatt-ai-smollm3-gpu
       EXPERIMENT_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -27,9 +27,9 @@ jobs:
       - name: Ensure credentials are set
         run: |
           test -n "$KAGGLE_USERNAME" || { echo "::error::KAGGLE_USERNAME secret missing"; exit 1; }
-          test -n "$KAGGLE_KEY" || { echo "::error::KAGGLE_KEY secret missing"; exit 1; }
+          test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN secret missing"; exit 1; }
       - name: Install Kaggle CLI
-        run: python -m pip install 'kaggle>=1.7,<2'
+        run: python -m pip install 'kaggle>=1.8,<2'
       - name: Prepare isolated kernel submission
         run: python scripts/prepare_kaggle_kernel.py --sha "$GITHUB_SHA" --username "$KAGGLE_USERNAME" --run-id "$EXPERIMENT_RUN_ID" --output kaggle-submission
       - name: Submit Kaggle GPU run and retrieve output
