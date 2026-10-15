@@ -1,5 +1,7 @@
 {
   "model_id": "HuggingFaceTB/SmolLM3-3B",
+  "model_revision": "1c00fc78bd9cf90108046bc433cb34992480f1c1",
   "prompt": "Explain in one sentence why reproducible scientific experiments matter.",
-  "max_new_tokens": 64
+  "max_new_tokens": 64,
+  "enable_thinking": false
 }
