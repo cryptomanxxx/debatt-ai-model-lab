@@ -1,0 +1,42 @@
+name: Kaggle GPU Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-smollm3-gpu
+  cancel-in-progress: false
+
+jobs:
+  kaggle-gpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL_SLUG: debatt-ai-smollm3-gpu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ensure credentials are set
+        run: |
+          test -n "$KAGGLE_USERNAME" || { echo "::error::KAGGLE_USERNAME secret missing"; exit 1; }
+          test -n "$KAGGLE_KEY" || { echo "::error::KAGGLE_KEY secret missing"; exit 1; }
+      - name: Install Kaggle CLI
+        run: python -m pip install 'kaggle>=1.7,<2'
+      - name: Prepare isolated kernel submission
+        run: python scripts/prepare_kaggle_kernel.py --sha "$GITHUB_SHA" --username "$KAGGLE_USERNAME" --output kaggle-submission
+      - name: Submit Kaggle GPU run and retrieve output
+        run: bash scripts/run_kaggle_kernel.sh
+      - name: Upload experimental artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-smollm3-${{ github.run_id }}
+          path: kaggle-results/
+          if-no-files-found: warn
