@@ -10,6 +10,7 @@ from pathlib import Path
 
 repo = "/kaggle/working/debatt-ai-model-lab"
 sha = __COMMIT_SHA__
+run_id = __RUN_ID__
 subprocess.run(["git", "clone", "--quiet", "https://github.com/cryptomanxxx/debatt-ai-model-lab.git", repo], check=True)
 subprocess.run(["git", "-C", repo, "checkout", "--detach", sha], check=True)
 # Kaggle provides a GPU-enabled PyTorch build; avoid overwriting it with an incompatible wheel.
@@ -20,16 +21,18 @@ subprocess.run(
 )
 # Written only after successful experiment execution.
 with open("/kaggle/working/experiment_provenance.json", "w", encoding="utf-8") as fp:
-    json.dump({"git_sha": sha}, fp)
+    json.dump({"git_sha": sha, "run_id": run_id}, fp)
 """
 
-def prepare(sha: str, username: str, output: Path) -> None:
+def prepare(sha: str, username: str, output: Path, run_id: str = "local-test") -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("Git commit must be a full 40-character SHA")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("Invalid Kaggle username")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("Invalid run identifier")
     output.mkdir(parents=True, exist_ok=True)
-    (output / "run.py").write_text(RUNNER.replace("__COMMIT_SHA__", repr(sha)), encoding="utf-8")
+    (output / "run.py").write_text(RUNNER.replace("__COMMIT_SHA__", repr(sha)).replace("__RUN_ID__", repr(run_id)), encoding="utf-8")
     metadata = {
         "id": f"{username}/debatt-ai-smollm3-gpu",
         "title": "Debatt AI SmolLM3 GPU",
@@ -51,5 +54,6 @@ if __name__ == "__main__":
     parser.add_argument("--sha", required=True)
     parser.add_argument("--username", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
-    prepare(args.sha, args.username, args.output)
+    prepare(args.sha, args.username, args.output, args.run_id)
