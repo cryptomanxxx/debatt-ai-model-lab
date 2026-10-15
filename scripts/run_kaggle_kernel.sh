@@ -2,13 +2,28 @@
 set -euo pipefail
 
 kernel="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+: "${GITHUB_SHA:?GITHUB_SHA must be set}"
 mkdir -p kaggle-results
 
-# Save logs even when submission or run fails.
-kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 2>&1 | tee kaggle-results/submission.log
+# CLI versions can print "Kernel push error" yet return exit status 0.
+# Fail closed unless the CLI explicitly confirms a successful new version.
+if ! kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 > kaggle-results/submission.log 2>&1; then
+  cat kaggle-results/submission.log
+  echo "::error::Kaggle submission command failed"
+  exit 1
+fi
+cat kaggle-results/submission.log
+if grep -Eiq 'kernel push error|error pushing|failed|traceback' kaggle-results/submission.log; then
+  echo "::error::Kaggle rejected the submission"
+  exit 1
+fi
+if ! grep -Eiq 'kernel version [0-9]+ successfully pushed|kernel version [0-9]+ pushed' kaggle-results/submission.log; then
+  echo "::error::Kaggle submission did not confirm a new kernel version"
+  exit 1
+fi
 
-# API status refers to the most recent kernel version. The workflow uses a
-# serialized concurrency group to avoid overlapping submissions from this repo.
+# Only the exact completed state qualifies; never trust a previous version's
+# result merely because status reports COMPLETE.
 completed=0
 for i in $(seq 1 100); do
   status="$(kaggle kernels status "$kernel" 2>&1)" || {
@@ -17,14 +32,14 @@ for i in $(seq 1 100); do
   }
   echo "$status" | tee -a kaggle-results/status.log
   normalized="$(printf '%s' "$status" | tr '[:upper:]' '[:lower:]')"
-  if echo "$normalized" | grep -Eq 'complete|success'; then
+  if echo "$normalized" | grep -Eq '(^|[^a-z])error([^a-z]|$)|(^|[^a-z])failed([^a-z]|$)|(^|[^a-z])cancelled([^a-z]|$)'; then
+    echo "::error::Kaggle run failed"
+    kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/output-download.log 2>&1 || true
+    exit 1
+  fi
+  if echo "$normalized" | grep -Eq '(^|[^a-z])complete([^a-z]|$)'; then
     completed=1
     break
-  fi
-  if echo "$normalized" | grep -Eq 'error|failed|cancel'; then
-    echo "::error::Kaggle run failed"
-    kaggle kernels logs "$kernel" > kaggle-results/kernel.log 2>&1 || true
-    exit 1
   fi
   sleep 60
 done
@@ -34,11 +49,28 @@ if [ "$completed" -ne 1 ]; then
   exit 1
 fi
 
-kaggle kernels output "$kernel" -p kaggle-results --force
-if [ ! -s kaggle-results/smollm3_smoketest.json ]; then
-  echo "::error::Expected experiment JSON missing or empty"
-  kaggle kernels logs "$kernel" > kaggle-results/kernel.log 2>&1 || true
+kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/output-download.log 2>&1 || {
+  cat kaggle-results/output-download.log
   exit 1
-fi
-python -m json.tool kaggle-results/smollm3_smoketest.json >/dev/null
-echo "GPU smoke test completed; result downloaded."
+}
+
+# Provenance is written by the remote runner AFTER the model test succeeds.
+# A stale result from a previous Kaggle kernel version must be rejected.
+python - "$GITHUB_SHA" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+result_dir = Path("kaggle-results")
+provenance = result_dir / "experiment_provenance.json"
+result = result_dir / "smollm3_smoketest.json"
+if not provenance.is_file() or not result.is_file():
+    raise SystemExit("Missing experiment result or provenance: run not verified")
+record = json.loads(provenance.read_text(encoding="utf-8"))
+if record.get("git_sha") != sys.argv[1]:
+    raise SystemExit("Kaggle result SHA does not match the submitted GitHub commit")
+data = json.loads(result.read_text(encoding="utf-8"))
+if not data.get("cuda_available") or not data.get("response"):
+    raise SystemExit("Kaggle GPU result is invalid or incomplete")
+print("Verified Kaggle result provenance for", sys.argv[1])
+PY
