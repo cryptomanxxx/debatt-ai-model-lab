@@ -23,21 +23,22 @@
     "enable_thinking": false,
     "max_new_tokens": 64,
     "do_sample": false,
-    "input_sha256": "34daaae6a673015912b12d94c36245252222143f658ea9087e4523e81269851e"
+    "input_sha256": "34daaae6a673015912b12d94c36245252222143f658ea9087e4523e81269851e",
+    "rendered_prompt": "<|im_start|>system\n## Metadata\n\nKnowledge Cutoff Date: June 2025\nToday Date: 15 October 2026\nReasoning Mode: /no_think\n\n## Custom Instructions\n\nYou are a helpful AI assistant named SmolLM, trained by Hugging Face.\n\n<|im_start|>user\nExplain in one sentence why reproducible scientific experiments matter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n"
   },
   "hardware": {
     "cuda_available": true,
-    "gpu_name": "Tesla T4",
-    "cuda_runtime_version": "12.8"
+    "gpu_name": "Tesla T4"
   },
   "software": {
     "python_version": "3.13.15",
     "torch_version": "2.11.0+cu128",
-    "transformers_version": "4.53.3"
+    "transformers_version": "4.53.3",
+    "pytorch_cuda_build_version": "12.8"
   },
   "interpretation": {
     "technical_smoke_test_passed": true,
     "scientific_quality_benchmark": false,
-    "notes": "Curated, human-readable subset of the original Kaggle output, not the complete environment package inventory or model input tokens. See original GitHub Actions artifact for full source data."
+    "notes": "Curated subset of the original Kaggle output including the exact rendered prompt; not the complete package inventory or token IDs. PyTorch CUDA build version is not necessarily the system CUDA runtime or GPU driver. See original GitHub Actions artifact for full source data."
   }
 }
