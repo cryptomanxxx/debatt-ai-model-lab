@@ -5,7 +5,6 @@ import importlib.metadata
 import json
 import platform
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,6 +26,19 @@ def load_config(path: str) -> dict:
 def require_cuda(torch_module) -> None:
     if not torch_module.cuda.is_available():
         raise RuntimeError("CUDA GPU required; enable the Kaggle GPU accelerator before running.")
+
+
+def validate_generation(generated_ids, eos_token_id, max_new_tokens, decoded_response):
+    """Reject empty, unterminated or potentially truncated completions."""
+    ids = generated_ids.tolist() if hasattr(generated_ids, "tolist") else list(generated_ids)
+    eos_ids = {int(x) for x in (eos_token_id if isinstance(eos_token_id, (list, tuple, set)) else [eos_token_id]) if x is not None}
+    if not ids or not decoded_response.strip():
+        raise RuntimeError("Smoke test failed: empty generated response")
+    if not eos_ids or ids[-1] not in eos_ids:
+        raise RuntimeError("Smoke test failed: response did not terminate with EOS (possibly truncated)")
+    if len(ids) > max_new_tokens:
+        raise RuntimeError("Smoke test failed: generation exceeded max_new_tokens")
+    return "eos"
 
 
 def main() -> None:
@@ -53,13 +65,25 @@ def main() -> None:
     )
     inputs = tokenizer(rendered_prompt, return_tensors="pt").input_ids.to(model.device)
     token_ids = inputs[0].tolist()
+    generation_settings = {
+        "max_new_tokens": config["max_new_tokens"],
+        "do_sample": False,
+        "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": model.generation_config.eos_token_id,
+    }
     with torch.inference_mode():
         output = model.generate(
-            inputs, max_new_tokens=config["max_new_tokens"], do_sample=False,
-            pad_token_id=tokenizer.eos_token_id,
+            inputs, max_new_tokens=generation_settings["max_new_tokens"],
+            do_sample=generation_settings["do_sample"],
+            pad_token_id=generation_settings["pad_token_id"],
+            eos_token_id=generation_settings["eos_token_id"],
         )
     generated_tokens = output[0, inputs.shape[-1]:]
     response = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+    finish_reason = validate_generation(
+        generated_tokens, generation_settings["eos_token_id"],
+        generation_settings["max_new_tokens"], response
+    )
     packages = {d.metadata["Name"].lower(): d.version for d in importlib.metadata.distributions()
                 if d.metadata.get("Name")}
     result = {
@@ -72,6 +96,8 @@ def main() -> None:
         "enable_thinking": config["enable_thinking"],
         "response": response,
         "generated_tokens": int(generated_tokens.numel()),
+        "generation_settings": generation_settings,
+        "finish_reason": finish_reason,
         "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0),
         "python_version": sys.version,
