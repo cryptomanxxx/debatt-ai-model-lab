@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "experiment_id": "smollm3-smoketest-38818685212-1",
+  "status": "completed",
+  "source": {
+    "repository": "cryptomanxxx/debatt-ai-model-lab",
+    "git_sha": "6e0266680a310c6a4cfc9e5d4c8728ab0c0989ac",
+    "github_actions_run_id": 38818685212,
+    "run_attempt": 1,
+    "github_actions_url": "https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/38818685212"
+  },
+  "model": {
+    "id": "HuggingFaceTB/SmolLM3-3B",
+    "revision": "1c00fc78bd9cf90108046bc433cb34992480f1c1"
+  },
+  "inference": {
+    "prompt": "Explain in one sentence why reproducible scientific experiments matter.",
+    "rendered_prompt": "<|im_start|>system\n## Metadata\n\nKnowledge Cutoff Date: June 2025\nToday Date: 15 October 2026\nReasoning Mode: /no_think\n\n## Custom Instructions\n\nYou are a helpful AI assistant named SmolLM, trained by Hugging Face.\n\n<|im_start|>user\nExplain in one sentence why reproducible scientific experiments matter.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n",
+    "response": "Reproducible scientific experiments matter because they ensure that results can be consistently verified and trusted, allowing the scientific community to build upon and validate findings, ultimately advancing knowledge and reducing the risk of errors or misinterpretations.",
+    "generated_tokens": 44,
+    "finish_reason": "eos",
+    "enable_thinking": false,
+    "generation_settings": {
+      "max_new_tokens": 64,
+      "do_sample": false,
+      "pad_token_id": 128012,
+      "eos_token_id": 128012
+    },
+    "input_sha256": "34daaae6a673015912b12d94c36245252222143f658ea9087e4523e81269851e"
+  },
+  "hardware": {
+    "cuda_available": true,
+    "gpu_name": "Tesla T4"
+  },
+  "software": {
+    "python_version": "3.13.15 (main, Aug  6 2026, 11:06:22) [GCC 13.3.0]",
+    "torch_version": "2.11.0+cu128",
+    "pytorch_cuda_build_version": "12.8",
+    "transformers_version": "4.53.3"
+  },
+  "interpretation": {
+    "technical_smoke_test_passed": true,
+    "scientific_quality_benchmark": false,
+    "notes": "CUDA build version is from torch.version.cuda, not the host runtime or driver. Full unfiltered outputs remain in the time-limited GitHub Actions artifact."
+  }
+}
