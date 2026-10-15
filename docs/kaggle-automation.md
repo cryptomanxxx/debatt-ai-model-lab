@@ -9,11 +9,9 @@ polls the kernel status, downloads its JSON output and saves it as a GitHub Acti
 Set these GitHub **Actions repository secrets** in Settings → Secrets and variables → Actions:
 
 - `KAGGLE_USERNAME`: your Kaggle account username (not your email)
-- `KAGGLE_KEY`: the Kaggle legacy API key/token accepted by `KAGGLE_USERNAME` / `KAGGLE_KEY` authentication
+- `KAGGLE_API_TOKEN`: a modern Kaggle API access token generated in Kaggle Settings → API Tokens
 
-Never paste tokens in the repository, PR comments, or Actions logs. If your Kaggle account
-uses the newer API token scheme instead, adjust authentication before running; the
-workflow deliberately uses the legacy environment-variable pair.
+Never paste tokens in the repository, PR comments, or Actions logs. The workflow uses `KAGGLE_API_TOKEN` for CLI authentication; `KAGGLE_USERNAME` is still required to construct the kernel identifier. The legacy `KAGGLE_KEY` secret is no longer used and can be deleted after this change is merged. Kaggle CLI version 1.8 or later is required.
 
 ## Notes and limits
 
