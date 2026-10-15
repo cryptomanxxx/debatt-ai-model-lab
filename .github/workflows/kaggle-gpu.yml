@@ -41,3 +41,53 @@ jobs:
           name: kaggle-smollm3-${{ github.run_id }}
           path: kaggle-results/
           if-no-files-found: warn
+
+  archive-results:
+    name: Archive verified experiment
+    needs: kaggle-gpu
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download verified Kaggle output
+        uses: actions/download-artifact@v4
+        with:
+          name: kaggle-smollm3-${{ github.run_id }}
+          path: kaggle-results/
+      - name: Prepare dedicated results branch
+        run: |
+          if git ls-remote --exit-code --heads origin experiment-results >/dev/null; then
+            git fetch origin experiment-results
+            git worktree add --detach archive-tree origin/experiment-results
+          else
+            git worktree add --detach archive-tree "$GITHUB_SHA"
+          fi
+      - name: Validate and format archive
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          PRODUCER_RUN_ID="$(python -c 'import json; print(json.load(open("kaggle-results/experiment_provenance.json", encoding="utf-8"))["run_id"])')"
+          case "$PRODUCER_RUN_ID" in
+            "${GITHUB_RUN_ID}-"*) ;;
+            *) echo "::error::Artifact belongs to a different workflow run"; exit 1 ;;
+          esac
+          python scripts/archive_experiment.py --source kaggle-results --destination archive-tree/results --sha "$SOURCE_SHA" --run-id "$PRODUCER_RUN_ID" --run-url "$RUN_URL"
+      - name: Commit archive to experiment-results only
+        working-directory: archive-tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          git diff --cached --quiet && { echo "No new results to archive"; exit 0; }
+          PRODUCER_RUN_ID="$(python -c 'import json; print(json.load(open("../kaggle-results/experiment_provenance.json", encoding="utf-8"))["run_id"])')"
+          git commit -m "data: archive Kaggle experiment ${PRODUCER_RUN_ID}"
+          git push origin HEAD:refs/heads/experiment-results
