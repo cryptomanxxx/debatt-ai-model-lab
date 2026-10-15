@@ -13,7 +13,7 @@
 ## Verified result
 
 - **GPU:** NVIDIA Tesla T4 (`cuda_available: true`)
-- **Runtime:** CUDA 12.8, PyTorch 2.11.0+cu128, Transformers 4.53.3
+- **Software:** PyTorch 2.11.0+cu128 (PyTorch CUDA build: 12.8), Transformers 4.53.3. The host CUDA runtime and NVIDIA driver versions were not independently recorded.
 - **Configuration:** deterministic greedy decoding (`do_sample: false`), thinking disabled, 64-token generation cap
 - **Generated tokens:** 44; **finish reason:** `eos`
 - **Prompt:** Explain in one sentence why reproducible scientific experiments matter.
@@ -21,7 +21,9 @@
 
 > Reproducible scientific experiments matter because they ensure that results can be consistently verified and trusted, allowing the scientific community to build upon and validate findings, ultimately advancing knowledge and reducing the risk of errors or misinterpretations.
 
-The GitHub Actions runner confirmed Kaggle's `KernelWorkerStatus.COMPLETE`, downloaded outputs, and verified their source commit and unique run ID before uploading the artifact. The curated `result.json` is derived from the original `smollm3_smoketest.json` and `experiment_provenance.json`; it intentionally omits the full package inventory and token IDs to keep Git history small.
+**Rendered model input:** The exact chat-template output is preserved in `result.json` under `inference.rendered_prompt`, including the system metadata, date, reasoning setting and model special tokens.
+
+The GitHub Actions runner confirmed Kaggle's `KernelWorkerStatus.COMPLETE`, downloaded outputs, and verified their source commit and unique run ID before uploading the artifact. The curated `result.json` is derived from the original `smollm3_smoketest.json` and `experiment_provenance.json`; it intentionally omits the full package inventory and input token IDs to keep Git history small.
 
 ## Limitations
 
