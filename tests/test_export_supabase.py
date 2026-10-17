@@ -97,6 +97,9 @@ def test_manifest_records_counts_and_hashes(tmp_path):
     assert len((out / "artiklar.jsonl").read_text().splitlines()) == 2
     assert manifest["files"]["artiklar"]["rows_by_month"] == {"2026-06": 1, "2026-09": 1}
     assert manifest["files"]["markets"]["resolved_by_split"] == {"train": 1, "test": 0}
+    assert manifest["files"]["markets"]["resolved_by_month"] == {"2026-05": 1}
+    # Bet 2 was placed in August but belongs to the September market, like its split.
+    assert manifest["files"]["agent_bets"]["rows_by_month"] == {"2026-05": 1, "2026-09": 1}
 
 
 def test_empty_table_rejected(tmp_path):

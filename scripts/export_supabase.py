@@ -71,6 +71,14 @@ def utc_date(created: str) -> date:
     return moment.date()
 
 
+def month_of(created: str) -> str:
+    return utc_date(created).strftime("%Y-%m")
+
+
+def monthly(months) -> dict:
+    return dict(sorted(Counter(months).items()))
+
+
 def split_for(created: str, test_from: date) -> str:
     return "test" if utc_date(created) >= test_from else "train"
 
@@ -91,6 +99,7 @@ def assign_splits(data: dict, test_from: date) -> dict:
 def write_export(data: dict, output: Path, test_from: date, source: str) -> Path:
     output.mkdir(parents=True, exist_ok=False)
     files = {}
+    market_month = {row["id"]: month_of(row["skapad"]) for row in data["markets"]}
     for table, rows in data.items():
         if not rows:
             raise ValueError(f"Table {table} returned no rows; refusing an incomplete export")
@@ -101,7 +110,9 @@ def write_export(data: dict, output: Path, test_from: date, source: str) -> Path
             "train_rows": sum(row["split"] == "train" for row in rows),
             "test_rows": sum(row["split"] == "test" for row in rows),
             # Per-month counts make it possible to choose test_from without downloading the data.
-            "rows_by_month": dict(sorted(Counter(utc_date(row["skapad"]).strftime("%Y-%m") for row in rows).items())),
+            # Bets are counted under their market's month, matching how assign_splits splits them.
+            "rows_by_month": monthly(market_month[row["market_id"]] if table == "agent_bets" else month_of(row["skapad"])
+                                     for row in rows),
             "columns": TABLES[table],
             "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         }
@@ -109,6 +120,8 @@ def write_export(data: dict, output: Path, test_from: date, source: str) -> Path
         split: sum(row["split"] == split and row["status"] == "avgjord" for row in data["markets"])
         for split in ("train", "test")
     }
+    files["markets"]["resolved_by_month"] = monthly(
+        month_of(row["skapad"]) for row in data["markets"] if row["status"] == "avgjord")
     manifest = {
         "schema_version": 1,
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
