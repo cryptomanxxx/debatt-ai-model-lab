@@ -7,6 +7,7 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -63,11 +64,15 @@ def fetch_table(base_url: str, key: str, table: str, columns: list, fetch=fetch_
     return rows
 
 
-def split_for(created: str, test_from: date) -> str:
+def utc_date(created: str) -> date:
     moment = datetime.fromisoformat(created)
     if moment.tzinfo is not None:
         moment = moment.astimezone(timezone.utc)
-    return "test" if moment.date() >= test_from else "train"
+    return moment.date()
+
+
+def split_for(created: str, test_from: date) -> str:
+    return "test" if utc_date(created) >= test_from else "train"
 
 
 def assign_splits(data: dict, test_from: date) -> dict:
@@ -95,9 +100,15 @@ def write_export(data: dict, output: Path, test_from: date, source: str) -> Path
             "rows": len(rows),
             "train_rows": sum(row["split"] == "train" for row in rows),
             "test_rows": sum(row["split"] == "test" for row in rows),
+            # Per-month counts make it possible to choose test_from without downloading the data.
+            "rows_by_month": dict(sorted(Counter(utc_date(row["skapad"]).strftime("%Y-%m") for row in rows).items())),
             "columns": TABLES[table],
             "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         }
+    files["markets"]["resolved_by_split"] = {
+        split: sum(row["split"] == split and row["status"] == "avgjord" for row in data["markets"])
+        for split in ("train", "test")
+    }
     manifest = {
         "schema_version": 1,
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
