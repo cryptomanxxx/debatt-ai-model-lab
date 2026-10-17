@@ -1,5 +1,6 @@
 """GPU-only inference smoke test for a pinned SmolLM3 revision."""
 import argparse
+import datetime
 import hashlib
 import importlib.metadata
 import json
@@ -11,7 +12,7 @@ from pathlib import Path
 
 def load_config(path: str) -> dict:
     config = json.loads(Path(path).read_text(encoding="utf-8"))
-    required = {"model_id", "model_revision", "prompt", "max_new_tokens", "enable_thinking"}
+    required = {"model_id", "model_revision", "prompt", "max_new_tokens", "enable_thinking", "template_date"}
     if not required.issubset(config):
         raise ValueError(f"Missing config keys: {sorted(required - set(config))}")
     if not re.fullmatch(r"[0-9a-f]{40}", config["model_revision"]):
@@ -20,7 +21,17 @@ def load_config(path: str) -> dict:
         raise ValueError("max_new_tokens must be a positive integer")
     if not isinstance(config["enable_thinking"], bool):
         raise ValueError("enable_thinking must be boolean")
+    try:
+        datetime.date.fromisoformat(config["template_date"])
+    except (TypeError, ValueError):
+        raise ValueError("template_date must be an ISO date (YYYY-MM-DD)") from None
     return config
+
+
+def fixed_strftime(iso_date: str):
+    """Replace the chat template's clock so the rendered prompt is identical on every day."""
+    date = datetime.date.fromisoformat(iso_date)
+    return lambda fmt: date.strftime(fmt)
 
 
 def require_cuda(torch_module) -> None:
@@ -62,6 +73,9 @@ def main() -> None:
     rendered_prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True,
         enable_thinking=config["enable_thinking"],
+        # SmolLM3's template inserts "Today Date" via strftime_now(); render kwargs
+        # take precedence over the template's globals, pinning the date.
+        strftime_now=fixed_strftime(config["template_date"]),
     )
     inputs = tokenizer(rendered_prompt, return_tensors="pt").input_ids.to(model.device)
     token_ids = inputs[0].tolist()
@@ -94,6 +108,7 @@ def main() -> None:
         "input_token_ids": token_ids,
         "input_sha256": hashlib.sha256(inputs.cpu().numpy().tobytes()).hexdigest(),
         "enable_thinking": config["enable_thinking"],
+        "template_date": config["template_date"],
         "response": response,
         "generated_tokens": int(generated_tokens.numel()),
         "generation_settings": generation_settings,
