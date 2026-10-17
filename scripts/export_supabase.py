@@ -182,8 +182,12 @@ def write_export(data: dict, output: Path, test_from: date, source: str, test_un
         "source": source,
         "test_from": test_from.isoformat(),
         "test_until": test_until.isoformat() if test_until else None,
-        "split_rule": "train if skapad < test_from, test through test_until, excluded after (UTC dates); "
-                      "agent_bets follow their market, except bets placed after test_until are excluded",
+        "split_rule": (
+            "train if skapad < test_from, test through test_until, excluded after (UTC dates); "
+            "agent_bets follow their market, except bets placed after test_until are excluded"
+            if test_until else
+            "train if skapad < test_from, test from test_from onward (UTC dates); agent_bets follow their market"
+        ),
         "files": files,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

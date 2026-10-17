@@ -94,6 +94,8 @@ def test_manifest_records_counts_and_hashes(tmp_path):
     out = write_export(data, tmp_path / "export", date(2026, 9, 1), "https://x.supabase.co")
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["test_from"] == "2026-09-01"
+    assert manifest["test_until"] is None
+    assert manifest["split_rule"].endswith("test from test_from onward (UTC dates); agent_bets follow their market")
     assert manifest["files"]["agent_bets"]["test_rows"] == 1
     assert len((out / "artiklar.jsonl").read_text().splitlines()) == 2
     assert manifest["files"]["artiklar"]["rows_by_month"] == {"2026-06": 1, "2026-09": 1}
