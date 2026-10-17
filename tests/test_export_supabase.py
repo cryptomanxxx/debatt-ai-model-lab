@@ -6,7 +6,8 @@ from datetime import date
 import pytest
 
 from scripts import export_supabase
-from scripts.export_supabase import assign_splits, fetch_table, require_public_key, split_for, write_export
+from scripts.export_supabase import (assign_splits, fetch_table, frozen_test_set, require_public_key, split_for,
+                                     verify_frozen, write_export)
 
 
 def jwt(role):
@@ -93,6 +94,8 @@ def test_manifest_records_counts_and_hashes(tmp_path):
     out = write_export(data, tmp_path / "export", date(2026, 9, 1), "https://x.supabase.co")
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["test_from"] == "2026-09-01"
+    assert manifest["test_until"] is None
+    assert manifest["split_rule"].endswith("test from test_from onward (UTC dates); agent_bets follow their market")
     assert manifest["files"]["agent_bets"]["test_rows"] == 1
     assert len((out / "artiklar.jsonl").read_text().splitlines()) == 2
     assert manifest["files"]["artiklar"]["rows_by_month"] == {"2026-06": 1, "2026-09": 1}
@@ -107,3 +110,83 @@ def test_empty_table_rejected(tmp_path):
     data["markets"] = []
     with pytest.raises(ValueError, match="no rows"):
         write_export(data, tmp_path / "export", date(2026, 9, 1), "https://x.supabase.co")
+
+
+def window():
+    return date(2026, 9, 1), date(2026, 9, 30)
+
+
+def test_rows_after_test_until_are_excluded():
+    assert split_for("2026-09-30T23:59:59+00:00", *window()) == "test"
+    assert split_for("2026-10-01T00:00:00+00:00", *window()) == "excluded"
+
+
+def test_late_bet_on_test_market_is_excluded():
+    data = sample()
+    data["agent_bets"].append({"id": 3, "market_id": 11, "skapad": "2026-10-05T00:00:00+00:00"})
+    assign_splits(data, *window())
+    assert [row["split"] for row in data["agent_bets"]] == ["train", "test", "excluded"]
+
+
+def test_excluded_rows_reported_in_manifest(tmp_path):
+    data = sample()
+    data["artiklar"].append({"id": 3, "skapad": "2026-10-02T00:00:00+00:00"})
+    out = write_export(assign_splits(data, *window()), tmp_path / "export", window()[0], "https://x.supabase.co",
+                       window()[1])
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["test_until"] == "2026-09-30"
+    assert "bets placed after test_until are excluded" in manifest["split_rule"]
+    assert manifest["files"]["artiklar"]["excluded_rows"] == 1
+
+
+def frozen_sample():
+    data = sample()
+    data["markets"][1].update({"titel": "Fråga?", "utfall": None})
+    data["artiklar"][1].update({"rubrik": "Rubrik", "lasningar": 5})
+    return assign_splits(data, *window())
+
+
+def test_frozen_set_lists_test_ids():
+    frozen = frozen_test_set(frozen_sample(), *window())
+    assert frozen["test_until"] == "2026-09-30"
+    assert frozen["tables"]["artiklar"]["ids"] == [2]
+    assert frozen["tables"]["agent_bets"]["ids"] == [2]
+
+
+def test_frozen_set_tolerates_resolution_and_reads():
+    frozen = frozen_test_set(frozen_sample(), *window())
+    data = frozen_sample()
+    data["markets"][1].update({"status": "avgjord", "utfall": "ja"})
+    data["artiklar"][1]["lasningar"] = 50
+    data["artiklar"].append({"id": 4, "skapad": "2026-10-10T00:00:00+00:00"})
+    verify_frozen(assign_splits(data, *window()), frozen)
+
+
+def test_frozen_set_detects_edits_additions_and_deletions():
+    frozen = frozen_test_set(frozen_sample(), *window())
+    edited = frozen_sample()
+    edited["artiklar"][1]["rubrik"] = "Ändrad"
+    with pytest.raises(ValueError, match="content of frozen test rows changed"):
+        verify_frozen(edited, frozen)
+    added = frozen_sample()
+    added["chatt_debatter"].append({"id": 9, "skapad": "2026-09-15T00:00:00+00:00", "split": "test"})
+    with pytest.raises(ValueError, match="new ids \\[9\\]"):
+        verify_frozen(added, frozen)
+    deleted = frozen_sample()
+    deleted["artiklar"].pop()
+    with pytest.raises(ValueError, match="missing ids \\[2\\]"):
+        verify_frozen(deleted, frozen)
+
+
+def test_inverted_window_rejected(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["export_supabase.py", "--output", "out",
+                                     "--test-from", "2026-09-01", "--test-until", "2026-08-01"])
+    with pytest.raises(SystemExit):
+        export_supabase.main()
+    assert "must not be earlier than --test-from" in capsys.readouterr().err
+
+
+def test_verification_uses_exclusions_recorded_at_freeze(monkeypatch):
+    frozen = frozen_test_set(frozen_sample(), *window())
+    monkeypatch.setitem(export_supabase.MUTABLE_COLUMNS, "artiklar", {"lasningar", "rubrik"})
+    verify_frozen(frozen_sample(), frozen)
