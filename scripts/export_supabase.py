@@ -181,7 +181,7 @@ def write_export(data: dict, output: Path, test_from: date, source: str, test_un
         "test_from": test_from.isoformat(),
         "test_until": test_until.isoformat() if test_until else None,
         "split_rule": "train if skapad < test_from, test through test_until, excluded after (UTC dates); "
-                      "agent_bets follow their market",
+                      "agent_bets follow their market, except bets placed after test_until are excluded",
         "files": files,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -210,12 +210,15 @@ def main() -> None:
         parser.error("--write-frozen requires an explicit --test-from and --test-until")
     if args.test_until and args.test_until >= datetime.now(timezone.utc).date():
         parser.error("--test-until must be in the past, or rows created later that day would change the test set")
+    args.test_from = args.test_from or (datetime.now(timezone.utc).date() - timedelta(days=90))
+    if args.test_until and args.test_until < args.test_from:
+        parser.error("--test-until must not be earlier than --test-from")
     base_url = os.environ["SUPABASE_URL"].rstrip("/")
     if not re.fullmatch(r"https://[a-z0-9]+\.supabase\.co", base_url):
         raise ValueError("SUPABASE_URL must be https://<project>.supabase.co")
     key = os.environ["SUPABASE_ANON_KEY"]
     require_public_key(key)
-    test_from = args.test_from or (datetime.now(timezone.utc).date() - timedelta(days=90))
+    test_from = args.test_from
     data = {table: fetch_table(base_url, key, table, columns) for table, columns in TABLES.items()}
     assign_splits(data, test_from, args.test_until)
     if frozen:

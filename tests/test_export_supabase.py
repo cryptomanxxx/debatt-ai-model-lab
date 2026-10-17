@@ -133,6 +133,7 @@ def test_excluded_rows_reported_in_manifest(tmp_path):
                        window()[1])
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["test_until"] == "2026-09-30"
+    assert "bets placed after test_until are excluded" in manifest["split_rule"]
     assert manifest["files"]["artiklar"]["excluded_rows"] == 1
 
 
@@ -173,3 +174,11 @@ def test_frozen_set_detects_edits_additions_and_deletions():
     deleted["artiklar"].pop()
     with pytest.raises(ValueError, match="missing ids \\[2\\]"):
         verify_frozen(deleted, frozen)
+
+
+def test_inverted_window_rejected(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["export_supabase.py", "--output", "out",
+                                     "--test-from", "2026-09-01", "--test-until", "2026-08-01"])
+    with pytest.raises(SystemExit):
+        export_supabase.main()
+    assert "must not be earlier than --test-from" in capsys.readouterr().err
