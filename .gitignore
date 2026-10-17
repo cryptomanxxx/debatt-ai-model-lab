@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Exported datasets (Actions artifacts only, never committed)
+data/

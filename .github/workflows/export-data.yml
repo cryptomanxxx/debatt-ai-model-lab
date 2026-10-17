@@ -1,0 +1,41 @@
+name: Export Debatt-AI Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_from:
+        description: "First UTC date (YYYY-MM-DD) of the held-out test split. Empty = 90 days ago; pin it once the test set is frozen."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Public anon key only: the export sees exactly what RLS exposes on debatt-ai.se.
+      SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://fmwxftnistkoqazfwnuj.supabase.co' }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      TEST_FROM: ${{ inputs.test_from }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ensure credentials are set
+        run: test -n "$SUPABASE_ANON_KEY" || { echo "::error::SUPABASE_ANON_KEY secret missing"; exit 1; }
+      - name: Export time-split dataset
+        run: |
+          args=(--output "data/export-${GITHUB_RUN_ID}")
+          [ -n "$TEST_FROM" ] && args+=(--test-from "$TEST_FROM")
+          python scripts/export_supabase.py "${args[@]}"
+          cat "data/export-${GITHUB_RUN_ID}/manifest.json"
+      - name: Upload dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: debatt-ai-data-${{ github.run_id }}
+          path: data/export-${{ github.run_id }}/
+          retention-days: 90
