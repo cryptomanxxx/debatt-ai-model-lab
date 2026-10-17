@@ -18,7 +18,8 @@ def sample():
     return {
         "artiklar": [{"id": 1, "skapad": "2026-06-01T10:00:00+00:00"}, {"id": 2, "skapad": "2026-09-01T00:00:00+00:00"}],
         "chatt_debatter": [{"id": 1, "skapad": "2026-08-31T23:59:59+00:00"}],
-        "markets": [{"id": 10, "skapad": "2026-05-01T00:00:00+00:00"}, {"id": 11, "skapad": "2026-09-02T00:00:00+00:00"}],
+        "markets": [{"id": 10, "skapad": "2026-05-01T00:00:00+00:00", "status": "avgjord"},
+                    {"id": 11, "skapad": "2026-09-02T00:00:00+00:00", "status": "öppen"}],
         # Bet 2 is placed before test_from but on a test market: it must stay in test.
         "agent_bets": [{"id": 1, "market_id": 10, "skapad": "2026-05-02T00:00:00+00:00"},
                        {"id": 2, "market_id": 11, "skapad": "2026-08-01T00:00:00+00:00"}],
@@ -94,6 +95,11 @@ def test_manifest_records_counts_and_hashes(tmp_path):
     assert manifest["test_from"] == "2026-09-01"
     assert manifest["files"]["agent_bets"]["test_rows"] == 1
     assert len((out / "artiklar.jsonl").read_text().splitlines()) == 2
+    assert manifest["files"]["artiklar"]["rows_by_month"] == {"2026-06": 1, "2026-09": 1}
+    assert manifest["files"]["markets"]["resolved_by_split"] == {"train": 1, "test": 0}
+    assert manifest["files"]["markets"]["resolved_by_month"] == {"2026-05": 1}
+    # Bet 2 was placed in August but belongs to the September market, like its split.
+    assert manifest["files"]["agent_bets"]["rows_by_month"] == {"2026-05": 1, "2026-09": 1}
 
 
 def test_empty_table_rejected(tmp_path):
