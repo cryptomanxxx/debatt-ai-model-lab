@@ -14,7 +14,7 @@ run_id = __RUN_ID__
 subprocess.run(["git", "clone", "--quiet", "https://github.com/cryptomanxxx/debatt-ai-model-lab.git", repo], check=True)
 subprocess.run(["git", "-C", repo, "checkout", "--detach", sha], check=True)
 # Kaggle provides a GPU-enabled PyTorch build; avoid overwriting it with an incompatible wheel.
-subprocess.run(["python", "-m", "pip", "install", "transformers==4.53.3", "accelerate==1.9.0"], check=True)
+subprocess.run(["python", "-m", "pip", "install", "-r", "requirements-kaggle.txt"], cwd=repo, check=True)
 subprocess.run(
     ["python", "scripts/smollm3_smoketest.py", "--output", "/kaggle/working/smollm3_smoketest.json"],
     cwd=repo, check=True,

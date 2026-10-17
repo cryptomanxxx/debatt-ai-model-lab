@@ -49,6 +49,7 @@ def archive(source: Path, destination: Path, sha: str, run_id: str, run_url: str
             "generated_tokens": raw["generated_tokens"],
             "finish_reason": raw["finish_reason"],
             "enable_thinking": raw.get("enable_thinking"),
+            "template_date": raw.get("template_date"),
             "generation_settings": raw["generation_settings"],
             "input_sha256": raw.get("input_sha256"),
         },

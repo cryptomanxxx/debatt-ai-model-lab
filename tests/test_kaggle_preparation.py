@@ -15,6 +15,11 @@ def test_prepare_kernel(tmp_path: Path):
     assert metadata["enable_internet"] is True
     assert sha in script
     assert "98765-2" in script
+    # Versions live only in requirements-kaggle.txt, and Kaggle's torch is kept.
+    assert '"-r", "requirements-kaggle.txt"' in script
+    assert "==" not in script
+    pins = [line for line in Path("requirements-kaggle.txt").read_text().splitlines() if not line.startswith("#")]
+    assert not any(line.startswith("torch") for line in pins)
 
 
 def test_reject_invalid_sha(tmp_path: Path):
