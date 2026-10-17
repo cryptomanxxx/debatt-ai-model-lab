@@ -182,3 +182,9 @@ def test_inverted_window_rejected(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         export_supabase.main()
     assert "must not be earlier than --test-from" in capsys.readouterr().err
+
+
+def test_verification_uses_exclusions_recorded_at_freeze(monkeypatch):
+    frozen = frozen_test_set(frozen_sample(), *window())
+    monkeypatch.setitem(export_supabase.MUTABLE_COLUMNS, "artiklar", {"lasningar", "rubrik"})
+    verify_frozen(frozen_sample(), frozen)

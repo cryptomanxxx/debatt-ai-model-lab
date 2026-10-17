@@ -110,9 +110,9 @@ def assign_splits(data: dict, test_from: date, test_until: date | None = None) -
     return data
 
 
-def fingerprint(table: str, rows: list) -> str:
+def fingerprint(table: str, rows: list, mutable_columns: dict) -> str:
     """Order-independent hash of the immutable content of rows."""
-    skip = MUTABLE_COLUMNS.get(table, set()) | {"split"}
+    skip = set(mutable_columns.get(table, ())) | {"split"}
     lines = sorted(
         (row["id"], json.dumps({k: v for k, v in row.items() if k not in skip}, ensure_ascii=False, sort_keys=True))
         for row in rows
@@ -120,23 +120,25 @@ def fingerprint(table: str, rows: list) -> str:
     return hashlib.sha256("".join(f"{row_id}\t{body}\n" for row_id, body in lines).encode("utf-8")).hexdigest()
 
 
-def frozen_test_set(data: dict, test_from: date, test_until: date) -> dict:
+def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_columns: dict = MUTABLE_COLUMNS) -> dict:
     tables = {}
     for table, rows in data.items():
         test = [row for row in rows if row["split"] == "test"]
-        tables[table] = {"ids": sorted(row["id"] for row in test), "sha256": fingerprint(table, test)}
+        tables[table] = {"ids": sorted(row["id"] for row in test), "sha256": fingerprint(table, test, mutable_columns)}
     return {
         "schema_version": 1,
         "test_from": test_from.isoformat(),
         "test_until": test_until.isoformat(),
-        "mutable_columns": {table: sorted(columns) for table, columns in MUTABLE_COLUMNS.items()},
+        "mutable_columns": {table: sorted(columns) for table, columns in mutable_columns.items()},
         "tables": tables,
     }
 
 
 def verify_frozen(data: dict, frozen: dict) -> None:
     """Refuse to export if the frozen test rows were added, removed or edited."""
-    current = frozen_test_set(data, date.fromisoformat(frozen["test_from"]), date.fromisoformat(frozen["test_until"]))
+    # Hash with the exclusions recorded at freeze time, so later edits to MUTABLE_COLUMNS cannot break v1.
+    current = frozen_test_set(data, date.fromisoformat(frozen["test_from"]), date.fromisoformat(frozen["test_until"]),
+                              frozen["mutable_columns"])
     for table, expected in frozen["tables"].items():
         got = current["tables"][table]
         missing = sorted(set(expected["ids"]) - set(got["ids"]))
