@@ -54,9 +54,10 @@ Rules:
 
 1. **Public data only.** The export uses the anon key (refuses service-role and secret keys) and explicit column allowlists. `inlamningar` (all submissions, including **unpublished human texts with author names**) is not exported; see open questions.
 2. **Never committed.** Exports go to time-limited Actions artifacts. `data/` is gitignored.
-3. **Time split, never random.** Rows created on or after `test_from` are the held-out test set; bets follow their market. Once the first test set is frozen, `test_from` is pinned here and never moved; the test set is never used for training.
-4. **Forecasting without hindsight.** For a market, the model may only see information available at the market's creation date.
-5. **Distillation caveat.** Most articles were written by Llama 3.3 70B. Training on them caps the model near Llama's level. Filter by editor score, reads and votes, and up-weight human-written articles (`kalla = manniska`). Check the Llama 3.3 license before distributing a model trained on its outputs (to our recollection it requires "Llama" in such a model's name).
+3. **Time split, never random.** Rows created before `test_from` are training data; rows created from `test_from` through `test_until` are the held-out test set; newer rows are excluded from both, so they can never leak into training. Bets follow their market; bets placed after `test_until` are excluded. The test set is never used for training.
+4. **Frozen test set v1: 2026-09-01 through 2026-10-16 (UTC).** Chosen from the first export's monthly counts: about 30% of articles, 22% of debates and 26% of resolved markets (75 of 289) fall in the window. Its row ids and content fingerprints are committed in `evals/frozen/v1.json`, added from the first freeze run. Every later export verifies them and fails if a test row was added, removed or edited. Read counts and market resolution (`lasningar`, `status`, `utfall`, `resolution_kalla`) are excluded from the fingerprint: markets that are still open stay in the test set and count once they resolve.
+5. **Forecasting without hindsight.** For a market, the model may only see information available at the market's creation date.
+6. **Distillation caveat.** Most articles were written by Llama 3.3 70B. Training on them caps the model near Llama's level. Filter by editor score, reads and votes, and up-weight human-written articles (`kalla = manniska`). Check the Llama 3.3 license before distributing a model trained on its outputs (to our recollection it requires "Llama" in such a model's name).
 
 Oraklet's experiments are not exported: they are run directly from `debatt-ai-orchestrator`'s catalog, whose verification criteria are already automatic.
 
@@ -93,9 +94,9 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 
 ## 9. Milestones
 
-1. **Export** (this change): time-split public dataset as an Actions artifact.
+1. **Export**: time-split public dataset as an Actions artifact, with the frozen test set v1.
 2. **Pilot**: editor and prediction-market evaluation (no judge needed) for Qwen3-4B, Gemma 3 4B and SmolLM3-3B on Kaggle; choose the base model; measure CPU throughput of the quantized model.
-3. **Judged tasks**: article writing and debate with judge calibration; freeze the test set and pin `test_from`.
+3. **Judged tasks**: article writing and debate with judge calibration.
 4. **Fine-tuning**: QLoRA on the editor task first; every candidate is measured against the frozen test set.
 
 ## 10. Open questions

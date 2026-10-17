@@ -40,6 +40,8 @@ See [notebooks/README.md](notebooks/README.md) for Kaggle setup. A successful CI
 
 The manual **Export Debatt-AI Data** workflow reads public Debatt-AI data (articles, direct debates, prediction markets and bets) via Supabase REST, splits it by date into train/test, and uploads it with a manifest as an Actions artifact. Exports are never committed.
 
+Once `evals/frozen/v1.json` exists, a run with empty dates reuses its test window and fails if any frozen test row was added, removed or edited. To freeze a new window, run with `test_from`, `test_until` (a past date) and `freeze`; the ids and fingerprints are printed on the `FROZEN_TEST_SET` log line and saved in the artifact.
+
 Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys, so it can only read what Row Level Security exposes publicly. Optionally set the Actions variable `SUPABASE_URL`.
 
 ## Roadmap

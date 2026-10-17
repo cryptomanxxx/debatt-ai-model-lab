@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       test_from:
-        description: "First UTC date (YYYY-MM-DD) of the held-out test split. Empty = 90 days ago; pin it once the test set is frozen."
+        description: "First UTC date (YYYY-MM-DD) of the test split. Empty = use evals/frozen/v1.json if present, else 90 days ago."
         required: false
         default: ""
+      test_until:
+        description: "Last UTC date (YYYY-MM-DD) of the test split, in the past. Empty = no limit."
+        required: false
+        default: ""
+      freeze:
+        description: "Write the test set's ids and fingerprints (needs test_from and test_until)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +28,8 @@ jobs:
       SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://fmwxftnistkoqazfwnuj.supabase.co' }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       TEST_FROM: ${{ inputs.test_from }}
+      TEST_UNTIL: ${{ inputs.test_until }}
+      FREEZE: ${{ inputs.freeze }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,8 +39,15 @@ jobs:
         run: test -n "$SUPABASE_ANON_KEY" || { echo "::error::SUPABASE_ANON_KEY secret missing"; exit 1; }
       - name: Export time-split dataset
         run: |
-          args=(--output "data/export-${GITHUB_RUN_ID}")
+          out="data/export-${GITHUB_RUN_ID}"
+          args=(--output "$out")
+          # Once a test set is frozen, every export verifies it unless a new window is given explicitly.
+          if [ -z "$TEST_FROM$TEST_UNTIL" ] && [ -f evals/frozen/v1.json ]; then
+            args+=(--frozen evals/frozen/v1.json)
+          fi
           [ -n "$TEST_FROM" ] && args+=(--test-from "$TEST_FROM")
+          [ -n "$TEST_UNTIL" ] && args+=(--test-until "$TEST_UNTIL")
+          [ "$FREEZE" = "true" ] && args+=(--write-frozen "$out/frozen-test-set.json")
           python scripts/export_supabase.py "${args[@]}"
           cat "data/export-${GITHUB_RUN_ID}/manifest.json"
       - name: Upload dataset
