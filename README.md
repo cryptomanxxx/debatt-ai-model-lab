@@ -36,7 +36,16 @@ SmolLM3's chat template inserts "Today Date" into the system prompt. The script 
 
 See [notebooks/README.md](notebooks/README.md) for Kaggle setup. A successful CI run does **not** prove a GPU smoke test succeeded.
 
+## Data export
+
+The manual **Export Debatt-AI Data** workflow reads public Debatt-AI data (articles, direct debates, prediction markets and bets) via Supabase REST, splits it by date into train/test, and uploads it with a manifest as an Actions artifact. Exports are never committed.
+
+Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys, so it can only read what Row Level Security exposes publicly. Optionally set the Actions variable `SUPABASE_URL`.
+
 ## Roadmap
+
+See [docs/evaluation-plan.md](docs/evaluation-plan.md) for the goal of Debatt-AI model 1.0, the base model choice, metrics and release criteria.
+
 
 1. Validate the pinned SmolLM3 inference baseline on Kaggle GPU.
 2. Freeze the verified full environment, report results and evaluation metrics.
