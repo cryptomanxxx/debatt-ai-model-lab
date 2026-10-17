@@ -1,0 +1,14 @@
+{
+  "primary": {
+    "provider": "hip",
+    "base_url": "https://llm-service.ai.tu-darmstadt.de/v1",
+    "secret": "HIP_API_KEY",
+    "model": "Kimi-K2.6"
+  },
+  "control": {
+    "provider": "blablador",
+    "base_url": "https://api.blablador.fz-juelich.de/v1",
+    "secret": "BLABLADOR_API_KEY",
+    "model": "alias-glm-5.3-flash"
+  }
+}
