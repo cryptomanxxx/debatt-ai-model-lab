@@ -5,7 +5,7 @@ import pytest
 
 from scripts.pilot_eval import (baselines, brier, check_provenance, editor_items, editor_metrics, editor_prompt,
                                 find_dataset, load_config, market_items, market_metrics, market_prompt,
-                                parse_probability, parse_scores, spearman)
+                                parse_probability, parse_scores, spearman, train_mean_scores)
 
 FROZEN = {"test_from": "2026-09-01", "test_until": "2026-10-16"}
 
@@ -45,8 +45,8 @@ def test_only_resolved_test_markets_are_scored():
 
 def test_prompts_truncate_and_date_markets():
     assert editor_prompt(article(1) | {"artikel": "y" * 100}, 20).endswith("y" * 20)
-    market = {"skapad": "2026-09-14T10:00:00+00:00", "titel": "T", "beskrivning": None, "deadline": "2026-12-31"}
-    assert "Dagens datum är 2026-09-14" in market_prompt(market)
+    market = {"skapad": "2026-09-14T23:30:00-02:00", "titel": "T", "beskrivning": None, "deadline": "2026-12-31"}
+    assert "Dagens datum är 2026-09-15" in market_prompt(market)
 
 
 def test_parsers_accept_json_and_reject_out_of_range():
@@ -65,17 +65,28 @@ def test_metrics():
     assert brier([1.0, 0.0], [True, False]) == 0
     items = [article(1, arg=8), article(2, arg=4), article(3, arg=6)]
     preds = [{"arg": 7, "ori": 5, "rel": 5, "tro": 5}, None, {"arg": 6, "ori": 5, "rel": 5, "tro": 5}]
-    metrics = editor_metrics(items, preds)
-    assert metrics["parsed"] == 2 and metrics["arg"]["mae"] == pytest.approx(0.5)
+    fallback = {"arg": 5, "ori": 5, "rel": 5, "tro": 5}
+    metrics = editor_metrics(items, preds, fallback)
+    # The unparsable reply stays in the denominator with the fallback score: (1 + |4-5| + 0) / 3.
+    assert metrics["parsed"] == 2 and metrics["n"] == 3 and metrics["arg"]["mae"] == pytest.approx(2 / 3)
     markets = [{"id": 1, "utfall": "ja"}, {"id": 2, "utfall": "nej"}]
-    assert market_metrics(markets, [0.5, None]) == {"n": 2, "parsed": 1, "brier": 0.25}
+    assert market_metrics(markets, [1.0, None]) == {"n": 2, "parsed": 1, "brier": 0.125}
+
+
+def test_train_mean_fallback():
+    articles = [article(1, split="train", arg=4), article(2, split="train", arg=8), article(3, arg=0)]
+    assert train_mean_scores(articles)["arg"] == 6
 
 
 def test_baselines_use_train_rate_and_test_bets():
     markets = [{"id": 1, "split": "train", "utfall": "ja"}, {"id": 2, "split": "train", "utfall": "nej"},
-               {"id": 3, "split": "test", "status": "avgjord", "utfall": "ja"}]
-    bets = [{"market_id": 3, "split": "test", "sannolikhet": 80}, {"market_id": 3, "split": "test", "sannolikhet": 60},
-            {"market_id": 1, "split": "train", "sannolikhet": 10}]
+               {"id": 3, "split": "test", "status": "avgjord", "utfall": "ja", "skapad": "2026-09-10T08:00:00+00:00"}]
+    day = "2026-09-10T20:00:00+00:00"
+    bets = [{"market_id": 3, "split": "test", "sannolikhet": 80, "skapad": day},
+            {"market_id": 3, "split": "test", "sannolikhet": 60, "skapad": day},
+            # Placed days later, with information the model never had: excluded from the consensus.
+            {"market_id": 3, "split": "test", "sannolikhet": 99, "skapad": "2026-09-20T08:00:00+00:00"},
+            {"market_id": 1, "split": "train", "sannolikhet": 10, "skapad": day}]
     result = baselines(markets, bets, market_items(markets))
     assert result["train_base_rate"] == 0.5 and result["base_rate_brier"] == 0.25
     assert result["agent_consensus_brier"] == pytest.approx(0.09) and result["agent_consensus_markets"] == 1

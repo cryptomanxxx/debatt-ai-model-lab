@@ -4,7 +4,7 @@ import json
 import random
 import re
 import sys
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -48,8 +48,11 @@ def load_config(path: str) -> dict:
             raise ValueError(f"{model['id']}: revision must be a 40-character commit SHA or null")
     if not isinstance(config.get("editor_sample"), int) or config["editor_sample"] <= 0:
         raise ValueError("editor_sample must be a positive integer")
-    date.fromisoformat(config["template_date"])
     return config
+
+
+def utc_day(created: str) -> str:
+    return datetime.fromisoformat(created).astimezone(timezone.utc).date().isoformat()
 
 
 def find_dataset(root: Path) -> Path:
@@ -90,7 +93,7 @@ def editor_prompt(article: dict, max_chars: int) -> str:
 
 
 def market_prompt(market: dict) -> str:
-    return MARKET_PROMPT.format(today=market["skapad"][:10], titel=market.get("titel") or "",
+    return MARKET_PROMPT.format(today=utc_day(market["skapad"]), titel=market.get("titel") or "",
                                 beskrivning=market.get("beskrivning") or "", deadline=market.get("deadline") or "")
 
 
@@ -147,13 +150,19 @@ def spearman(x: list, y: list):
     return None if var == 0 else cov / var
 
 
-def editor_metrics(items: list, predictions: list) -> dict:
-    pairs = [(item, pred) for item, pred in zip(items, predictions) if pred is not None]
-    metrics = {"n": len(items), "parsed": len(pairs)}
+def train_mean_scores(articles: list) -> dict:
+    train = [a for a in articles if a["split"] == "train" and all(isinstance(a.get(k), int) for k in SCORES)]
+    return {k: sum(a[k] for a in train) / len(train) if train else 5 for k in SCORES}
+
+
+def editor_metrics(items: list, predictions: list, fallback: dict) -> dict:
+    """Score every item: an unparsable reply gets the training-mean scores, so failures cannot improve a model."""
+    guesses = [pred if pred is not None else fallback for pred in predictions]
+    metrics = {"n": len(items), "parsed": sum(pred is not None for pred in predictions)}
     for k in SCORES:
-        truth, guess = [item[k] for item, _ in pairs], [pred[k] for _, pred in pairs]
+        truth, guess = [item[k] for item in items], [g[k] for g in guesses]
         metrics[k] = {
-            "mae": sum(abs(a - b) for a, b in zip(truth, guess)) / len(pairs) if pairs else None,
+            "mae": sum(abs(a - b) for a, b in zip(truth, guess)) / len(items) if items else None,
             "spearman": spearman(truth, guess),
         }
     return metrics
@@ -164,18 +173,21 @@ def brier(probabilities: list, outcomes: list):
 
 
 def market_metrics(items: list, predictions: list) -> dict:
-    pairs = [(m, p) for m, p in zip(items, predictions) if p is not None]
-    return {"n": len(items), "parsed": len(pairs),
-            "brier": brier([p for _, p in pairs], [m["utfall"] == "ja" for m, _ in pairs])}
+    """Score every market: an unparsable reply counts as an uninformed 50% forecast."""
+    return {"n": len(items), "parsed": sum(p is not None for p in predictions),
+            "brier": brier([0.5 if p is None else p for p in predictions], [m["utfall"] == "ja" for m in items])}
 
 
 def baselines(markets: list, bets: list, items: list) -> dict:
     """Agent consensus and the training base rate, scored on the same resolved test markets."""
     train = [m for m in markets if m["split"] == "train" and m.get("utfall") in ("ja", "nej")]
     base_rate = sum(m["utfall"] == "ja" for m in train) / len(train) if train else 0.5
+    # The model forecasts as of the market's creation day, so only bets placed by that day may inform the consensus.
+    created = {m["id"]: utc_day(m["skapad"]) for m in items}
     by_market = {}
     for bet in bets:
-        if bet["split"] == "test" and isinstance(bet.get("sannolikhet"), (int, float)):
+        if (bet["split"] == "test" and bet["market_id"] in created and isinstance(bet.get("sannolikhet"), (int, float))
+                and utc_day(bet["skapad"]) <= created[bet["market_id"]]):
             by_market.setdefault(bet["market_id"], []).append(bet["sannolikhet"] / 100)
     outcomes = [m["utfall"] == "ja" for m in items]
     covered = [(sum(by_market[m["id"]]) / len(by_market[m["id"]]), m["utfall"] == "ja")
@@ -195,7 +207,7 @@ def resolve_revision(model_id: str, revision):
     return HfApi().model_info(model_id).sha
 
 
-def run_model(spec: dict, config: dict, editor: list, markets: list, torch) -> dict:
+def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: dict, torch) -> dict:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     revision = resolve_revision(spec["id"], spec.get("revision"))
@@ -214,15 +226,16 @@ def run_model(spec: dict, config: dict, editor: list, markets: list, torch) -> d
                                     pad_token_id=tokenizer.eos_token_id)
         return tokenizer.decode(output[0, inputs.shape[-1]:], skip_special_tokens=True)
 
-    editor_raw = [generate(editor_prompt(a, config["max_article_chars"]), config["template_date"], 64) for a in editor]
-    market_raw = [generate(market_prompt(m), m["skapad"][:10], 32) for m in markets]
+    # Each prompt is dated at its item's creation, so the "today" a template inserts matches what the item knew.
+    editor_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in editor]
+    market_raw = [generate(market_prompt(m), utc_day(m["skapad"]), 32) for m in markets]
     editor_pred = [parse_scores(text) for text in editor_raw]
     market_pred = [parse_probability(text) for text in market_raw]
     del model
     torch.cuda.empty_cache()
     return {
         "id": spec["id"], "revision": revision,
-        "editor": editor_metrics(editor, editor_pred),
+        "editor": editor_metrics(editor, editor_pred, fallback),
         "markets": market_metrics(markets, market_pred),
         "predictions": {
             "editor": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(editor, editor_raw, editor_pred)],
@@ -251,13 +264,15 @@ def main() -> None:
     bets = read_jsonl(data_dir / "agent_bets.jsonl")
     editor = editor_items(articles, config["editor_sample"], config["seed"])
     markets = market_items(markets_all)
+    fallback = train_mean_scores(articles)
 
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
         "config": config, "editor_items": len(editor), "market_items": len(markets),
-        "baselines": baselines(markets_all, bets, markets),
-        "models": [run_model(spec, config, editor, markets, torch) for spec in config["models"]],
+        "baselines": baselines(markets_all, bets, markets)
+        | {"editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback)},
+        "models": [run_model(spec, config, editor, markets, fallback, torch) for spec in config["models"]],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

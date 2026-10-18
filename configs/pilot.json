@@ -5,6 +5,5 @@
   ],
   "editor_sample": 200,
   "seed": 20261018,
-  "max_article_chars": 6000,
-  "template_date": "2026-01-01"
+  "max_article_chars": 6000
 }

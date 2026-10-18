@@ -52,8 +52,10 @@ The manual **Kaggle GPU Pilot Evaluation** workflow:
 3. runs `scripts/pilot_eval.py` on a Kaggle T4 for every model in `configs/pilot.json`.
 
 Two tasks are scored:
-- **Editor:** a seeded sample of test articles is scored on `arg`/`ori`/`rel`/`tro`. The prompt uses the Debatt-AI editor's criteria, and predictions are compared with the stored editor scores (MAE and Spearman).
-- **Markets:** every resolved test market gets a probability, dated at market creation, and is scored with Brier. The training base rate and the agents' consensus are scored as baselines.
+- **Editor:** a seeded sample of test articles is scored on `arg`/`ori`/`rel`/`tro`. The prompt uses the Debatt-AI editor's criteria, and predictions are compared with the stored editor scores (MAE and Spearman). The training-mean scores are reported as a baseline.
+- **Markets:** every resolved test market gets a probability, dated at market creation, and is scored with Brier. The training base rate and the agents' consensus are scored as baselines; the consensus counts only bets placed by the market's creation day.
+
+Every prompt is dated at its item's creation, including the date a chat template inserts. An unparsable reply is scored rather than dropped: the training mean for the editor, 50% for markets.
 
 The job summary shows the table; the artifact holds every raw reply. A model with `"revision": null` is resolved to its current Hugging Face commit at run time, and that commit is recorded in the results; pin it in the config afterwards.
 

@@ -58,8 +58,11 @@ jobs:
               e, k = m["editor"], ("arg", "ori", "rel", "tro")
               print(f"| {m['id']} | `{m['revision'][:7]}` | {e['parsed']}/{e['n']} | {' / '.join(f(e[x]['mae']) for x in k)} "
                     f"| {' / '.join(f(e[x]['spearman']) for x in k)} | {m['markets']['parsed']}/{m['markets']['n']} | {f(m['markets']['brier'])} |")
-          print(f"\nBaselines: base rate {b['train_base_rate']:.2f} → Brier {f(b['base_rate_brier'])}; "
-                f"agent consensus Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
+          t = b["editor_train_mean"]
+          print(f"\nBaselines: editor training mean → MAE {' / '.join(f(t[x]['mae']) for x in ('arg', 'ori', 'rel', 'tro'))}; "
+                f"market base rate {b['train_base_rate']:.2f} → Brier {f(b['base_rate_brier'])}; "
+                f"agent consensus (bets by creation day) Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
+          print("\nUnparsable replies are scored, not dropped: training-mean scores for the editor, 50% for markets.")
           PY
       - name: Upload results
         if: always()
