@@ -77,6 +77,16 @@ The manual **AI Model Training (Kaggle GPU)** workflow fine-tunes Qwen3-4B as th
 - **Evaluation:** the untuned 4-bit base (adapter disabled) and the tuned model are scored on validation and on the frozen test tasks (editor articles, film reviews, submissions). The MAE difference per score gets a paired 95% bootstrap interval.
 - **Privacy:** the adapter stays in the private Kaggle output. The public workflow artifact holds JSON and logs only; predictions are parsed scores, never raw replies.
 
+### Progress while a run is going
+
+While a Kaggle run is running, the workflow log shows its latest progress line after each status check, for example:
+
+```
+PROGRESS phase 6/9 training steps 40/111 | phase left ~38m10s | total left ~1h24m | elapsed 1h02m
+```
+
+The phase estimate uses the phase's own pace. The total also prices the remaining phases at the last measured pace of their kind (evaluation or training), and reads "not known yet" until every remaining kind has been measured once. Time spent in Kaggle's queue is not counted.
+
 ## Judge API smoke test
 
 **Judge API Smoke Test** checks `HIP_API_KEY` and `BLABLADOR_API_KEY` (Actions secrets). For the judges in `configs/judges.json`, it lists each provider's models and sends one synthetic prompt per judge. Errors are reported as short codes only, so keys cannot leak into logs.

@@ -173,3 +173,35 @@ def test_film_reviews_are_kept_out_of_the_editor_samples():
     assert [a["id"] for a in film_review_items(articles)] == [10]
     subs = [submission(1, "avvisa"), submission(2, "avvisa") | {"filmrecension": True}, submission(3, "publicera")]
     assert [s["id"] for s in submission_items(subs, 10, 7)] == [1, 3]
+
+
+def test_progress_reports_phase_and_total_time_left():
+    from scripts.pilot_eval import Progress
+    now, lines = [0.0], []
+    progress = Progress([("editor", 4, "editor"), ("training", 2, "training"), ("markets", 2, "editor")],
+                        clock=lambda: now[0], out=lambda line, flush: lines.append(line), every=0)
+
+    def step(seconds):
+        now[0] += seconds
+        return None
+    progress.run([10, 10, 10, 10], step)
+    assert lines[0] == ("PROGRESS phase 1/3 editor 1/4 | phase left ~0m30s | total left not known yet"
+                        " | elapsed 0m10s")
+    progress.next_phase()
+    now[0] += 60
+    progress.tick(1)
+    # Training is now measured at 60 s per step, and the last phase is priced at the editor pace of 10 s.
+    assert lines[-1] == ("PROGRESS phase 2/3 training 1/2 | phase left ~1m00s | total left ~1m20s"
+                         " | elapsed 1m40s")
+
+
+def test_progress_prints_at_most_once_per_interval_but_always_at_the_end():
+    from scripts.pilot_eval import Progress
+    now, lines = [0.0], []
+    progress = Progress([("editor", 5, "editor")], clock=lambda: now[0], out=lambda line, flush: lines.append(line),
+                        every=60)
+
+    def step(seconds):
+        now[0] += seconds
+    progress.run([1] * 5, step)
+    assert len(lines) == 2 and "5/5" in lines[-1]

@@ -28,6 +28,18 @@ if ! grep -Eiq 'kernel version [0-9]+ successfully pushed|kernel version [0-9]+ 
   exit 1
 fi
 
+# The live stream replays the running session from its start, so a short time-boxed attach yields its newest
+# PROGRESS line; unbuffered, so lines printed before the timeout are not lost. It comes first because the
+# one-shot log may still hold an earlier session's output. Neither fetch may block or fail the polling loop.
+latest_progress() {
+  local line
+  line="$(PYTHONUNBUFFERED=1 timeout 20 kaggle kernels logs "$kernel" --follow 2>/dev/null | grep -Eo 'PROGRESS [^"\\]*' | tail -n 1 || true)"
+  if [ -z "$line" ]; then
+    line="$(timeout 20 kaggle kernels logs "$kernel" 2>/dev/null | grep -Eo 'PROGRESS [^"\\]*' | tail -n 1 || true)"
+  fi
+  printf '%s' "$line"
+}
+
 # Only the exact completed state qualifies; never trust a previous version's
 # result merely because status reports COMPLETE.
 completed=0
@@ -50,7 +62,13 @@ for i in $(seq 1 "$max_polls"); do
       kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/output-download.log 2>&1 || true
       exit 1
       ;;
-    KernelWorkerStatus.QUEUED|KernelWorkerStatus.RUNNING)
+    KernelWorkerStatus.RUNNING)
+      # Relay the run's latest PROGRESS line (phase, items done, time left). Only those lines reach this
+      # public log; a missing or failing log fetch never stops the wait.
+      progress="$(latest_progress)"
+      if [ -n "$progress" ]; then echo "$progress"; fi
+      ;;
+    KernelWorkerStatus.QUEUED)
       ;;
     *)
       echo "::error::Unknown or missing Kaggle worker status: $status"
