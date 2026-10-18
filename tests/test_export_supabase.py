@@ -195,7 +195,7 @@ def test_verification_uses_exclusions_recorded_at_freeze(monkeypatch):
 def test_committed_frozen_set_v1_is_well_formed():
     frozen = json.loads(open("evals/frozen/v1.json", encoding="utf-8").read())
     assert (frozen["test_from"], frozen["test_until"]) == ("2026-09-01", "2026-10-16")
-    assert set(frozen["tables"]) == set(export_supabase.TABLES)
+    assert set(frozen["tables"]) == set(export_supabase.COLUMNS)
     for table in frozen["tables"].values():
         assert table["ids"] == sorted(set(table["ids"])) and len(table["sha256"]) == 64
 
