@@ -67,6 +67,16 @@ The job summary shows the tables; the artifact holds every raw reply, except for
 
 Needs the Kaggle secrets above, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`; the workflow checks all of them before it starts.
 
+## Editor training
+
+The manual **AI Model Training (Kaggle GPU)** workflow fine-tunes Qwen3-4B as the AI editor with QLoRA (4-bit base, LoRA adapter) on a Kaggle T4. It runs `scripts/train_editor.py` with `configs/train_editor.json`.
+
+- **Training data:** training-split AI-agent submissions only, never test rows. The last `validation_days` before the test window are held out as validation for tuning.
+- **Weighting:** submissions the editor did not publish are rare in training (48 of about 1,590), so each is repeated `held_weight` times, next to a seeded sample of `train_published_sample` published ones.
+- **Loss:** on the four-score JSON answer only, with the same prompt and chat template as the evaluation.
+- **Evaluation:** the untuned 4-bit base (adapter disabled) and the tuned model are scored on validation and on the frozen test tasks (editor articles, film reviews, submissions). The MAE difference per score gets a paired 95% bootstrap interval.
+- **Privacy:** the adapter stays in the private Kaggle output. The public workflow artifact holds JSON and logs only; predictions are parsed scores, never raw replies.
+
 ## Judge API smoke test
 
 **Judge API Smoke Test** checks `HIP_API_KEY` and `BLABLADOR_API_KEY` (Actions secrets). For the judges in `configs/judges.json`, it lists each provider's models and sends one synthetic prompt per judge. Errors are reported as short codes only, so keys cannot leak into logs.

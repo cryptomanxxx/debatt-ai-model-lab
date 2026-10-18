@@ -34,6 +34,11 @@ TASKS = {
         "command": ["python", "scripts/pilot_eval.py", "--output", "/kaggle/working/pilot_results.json",
                     "--run-id", "__RUN_ID_VALUE__"],
     },
+    "train": {
+        "slug": "debatt-ai-train-editor-gpu", "title": "Debatt AI Train Editor GPU", "dataset": True,
+        "command": ["python", "scripts/train_editor.py", "--output", "/kaggle/working/train_results.json",
+                    "--run-id", "__RUN_ID_VALUE__"],
+    },
 }
 
 

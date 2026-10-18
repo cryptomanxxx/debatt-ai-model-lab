@@ -54,4 +54,14 @@ def test_smoketest_kernel_has_no_dataset(tmp_path: Path):
 
 def test_unknown_task_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="Unknown task"):
-        prepare("b" * 40, "researcher", tmp_path, "555-1", task="train")
+        prepare("b" * 40, "researcher", tmp_path, "555-1", task="finetune")
+
+
+def test_prepare_training_kernel(tmp_path: Path):
+    prepare("c" * 40, "researcher", tmp_path, "777-1", task="train")
+    metadata = json.loads((tmp_path / "kernel-metadata.json").read_text())
+    script = (tmp_path / "run.py").read_text()
+    assert metadata["id"] == "researcher/debatt-ai-train-editor-gpu"
+    assert metadata["is_private"] is True
+    assert metadata["dataset_sources"] == ["researcher/debatt-ai-eval-data"]
+    assert "scripts/train_editor.py" in script and "'--run-id', '777-1'" in script

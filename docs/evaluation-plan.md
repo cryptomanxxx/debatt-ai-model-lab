@@ -97,7 +97,7 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 1. **Export**: time-split public dataset as an Actions artifact, with the frozen test set v1.
 2. **Pilot**: editor and prediction-market evaluation (no judge needed) on Kaggle; choose the base model; measure CPU throughput of the quantized model. The first pilot runs Qwen3-4B and SmolLM3-3B (`configs/pilot.json`). Gemma 3 4B is gated on Hugging Face and needs its license accepted, plus a token or Kaggle Models source, before it can be added.
 3. **Judged tasks**: article writing and debate with judge calibration.
-4. **Fine-tuning**: QLoRA on the editor task first; every candidate is measured against the frozen test set.
+4. **Fine-tuning**: QLoRA on the editor task first; every candidate is measured against the frozen test set. The first pilot with submissions (run [39112697417](https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/39112697417)) chose Qwen3-4B: its scores rank submissions weakly in the editor's order (Spearman 0.14–0.23) but sit too high, so almost nothing would be held back; that is a calibration problem fine-tuning targets. The 48 non-published training submissions are weighted up by repetition, which keeps v1 untouched.
 
 ## 10. Open questions
 
