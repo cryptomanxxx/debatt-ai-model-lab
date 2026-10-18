@@ -198,3 +198,73 @@ def test_committed_frozen_set_v1_is_well_formed():
     assert set(frozen["tables"]) == set(export_supabase.TABLES)
     for table in frozen["tables"].values():
         assert table["ids"] == sorted(set(table["ids"])) and len(table["sha256"]) == 64
+
+
+def test_service_key_check():
+    export_supabase.require_service_key(jwt("service_role"))
+    export_supabase.require_service_key("sb_secret_abc")
+    for key in (jwt("anon"), "sb_publishable_abc"):
+        with pytest.raises(ValueError, match="expected the service role key"):
+            export_supabase.require_service_key(key)
+
+
+def test_requests_are_get_only():
+    request = export_supabase.read_only_request("https://x.supabase.co/rest/v1/inlamningar", "k")
+    assert request.get_method() == "GET" and request.data is None
+
+
+def test_private_table_requests_only_ai_rows():
+    fetch, urls = fake_server([[{"id": 1, "kalla": "ai"}]], 1)
+    rows = export_supabase.fetch_private_table("https://x.supabase.co", "k", "inlamningar", fetch=fetch)
+    assert rows == [{"id": 1, "kalla": "ai"}]
+    assert "kalla=eq.ai" in urls[0]
+
+
+@pytest.mark.parametrize("kalla", ["manniska", None])
+def test_private_table_refuses_non_ai_rows(kalla):
+    fetch, _ = fake_server([[{"id": 1, "kalla": "ai"}, {"id": 2, "kalla": kalla}]], 2)
+    with pytest.raises(ValueError, match="kalla other than 'ai'"):
+        export_supabase.fetch_private_table("https://x.supabase.co", "k", "inlamningar", fetch=fetch)
+
+
+def with_submissions(data):
+    data["inlamningar"] = [
+        {"id": 5, "skapad": "2026-08-01T00:00:00+00:00", "beslut": "avvisa", "status": "avvisad", "kalla": "ai"},
+        {"id": 6, "skapad": "2026-09-05T00:00:00+00:00", "beslut": "publicera", "status": "inkorg", "kalla": "ai"},
+    ]
+    return data
+
+
+def test_submissions_are_split_and_counted(tmp_path):
+    data = assign_splits(with_submissions(sample()), *window())
+    assert [row["split"] for row in data["inlamningar"]] == ["train", "test"]
+    out = write_export(data, tmp_path / "export", *window()[:1], "https://x.supabase.co", window()[1])
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["files"]["inlamningar"]["beslut_by_split"] == {"train": {"avvisa": 1}, "test": {"publicera": 1}}
+    assert "beslut" in manifest["files"]["inlamningar"]["columns"]
+
+
+def test_publishing_a_frozen_submission_keeps_the_set_valid():
+    data = assign_splits(with_submissions(sample()), *window())
+    frozen = frozen_test_set(data, *window())
+    data["inlamningar"][1]["status"] = "publicerad"
+    verify_frozen(data, frozen)
+
+
+def test_frozen_private_table_missing_names_the_secret():
+    data = assign_splits(with_submissions(sample()), *window())
+    frozen = frozen_test_set(data, *window())
+    del data["inlamningar"]
+    with pytest.raises(ValueError, match="SUPABASE_SERVICE_ROLE_KEY"):
+        verify_frozen(data, frozen)
+
+
+def test_additions_cover_only_tables_the_frozen_file_lacks():
+    frozen = frozen_test_set(assign_splits(sample(), *window()), *window())
+    data = assign_splits(with_submissions(sample()), *window())
+    verify_frozen(data, frozen)
+    additions = export_supabase.frozen_additions(data, frozen)
+    assert list(additions["tables"]) == ["inlamningar"]
+    assert additions["tables"]["inlamningar"]["ids"] == [6]
+    assert additions["mutable_columns"] == {"inlamningar": ["status"]}
+    assert export_supabase.frozen_additions(assign_splits(sample(), *window()), frozen) is None

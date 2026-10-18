@@ -24,9 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Public anon key only: the export sees exactly what RLS exposes on debatt-ai.se.
+      # Public tables are read with the anon key: exactly what RLS exposes on debatt-ai.se.
       SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://fmwxftnistkoqazfwnuj.supabase.co' }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      # Optional, read-only (GET): AI-agent submissions in inlamningar, which RLS hides from anon.
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TEST_FROM: ${{ inputs.test_from }}
       TEST_UNTIL: ${{ inputs.test_until }}
       FREEZE: ${{ inputs.freeze }}
@@ -49,7 +51,10 @@ jobs:
           [ -n "$TEST_UNTIL" ] && args+=(--test-until "$TEST_UNTIL")
           [ "$FREEZE" = "true" ] && args+=(--write-frozen "$out/frozen-test-set.json")
           python scripts/export_supabase.py "${args[@]}"
-          cat "data/export-${GITHUB_RUN_ID}/manifest.json"
+          # Artifacts of a public repository can be downloaded by any GitHub user, so the submission texts
+          # stay out of it; the manifest keeps their counts. The private Kaggle dataset gets the full file.
+          rm -f "$out/inlamningar.jsonl"
+          cat "$out/manifest.json"
       - name: Upload dataset
         uses: actions/upload-artifact@v4
         with:

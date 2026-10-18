@@ -1,4 +1,4 @@
-"""Export public Debatt-AI data from Supabase REST into a time-split, versioned dataset."""
+"""Export Debatt-AI data from Supabase REST into a time-split, versioned dataset. Read-only: GET requests only."""
 import argparse
 import base64
 import hashlib
@@ -23,40 +23,73 @@ TABLES = {
     "agent_bets": ["id", "market_id", "agent", "sannolikhet", "motivering", "skapad"],
 }
 
+# Hidden from the anon key by RLS, so read with the service role key. Only AI-agent rows (kalla = 'ai') are
+# requested and kept: human submissions can be unpublished texts with real names and never leave the database.
+# Older rows without kalla are skipped rather than guessed from agent names.
+PRIVATE_TABLES = {
+    "inlamningar": {
+        "columns": ["id", "rubrik", "forfattare", "artikel", "kategori", "motivering", "beslut", "arg", "ori", "rel",
+                    "tro", "kalla", "status", "skapad"],
+        "filters": {"kalla": "eq.ai"},
+    },
+}
+COLUMNS = {**TABLES, **{table: spec["columns"] for table, spec in PRIVATE_TABLES.items()}}
+
 # Columns that legitimately change after a row is created (read counts, market resolution).
 # They are left out of the frozen test-set fingerprint so the set stays verifiable over time.
-MUTABLE_COLUMNS = {"artiklar": {"lasningar"}, "markets": {"resolution_kalla", "status", "utfall"}}
+MUTABLE_COLUMNS = {"artiklar": {"lasningar"}, "markets": {"resolution_kalla", "status", "utfall"},
+                   # A submission moves from inkorg to publicerad when it is published.
+                   "inlamningar": {"status"}}
 
 
-def require_public_key(key: str) -> None:
-    """Refuse privileged keys; the export must only see what RLS exposes publicly."""
+def key_role(key: str) -> str:
     if key.startswith("sb_secret_"):
-        raise ValueError("Refusing a Supabase secret key; use the public anon/publishable key")
+        return "service_role"
     if key.startswith("sb_publishable_"):
-        return
+        return "anon"
     parts = key.split(".")
     if len(parts) != 3:
         raise ValueError("Unrecognized Supabase key format")
-    payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
-    if payload.get("role") != "anon":
-        raise ValueError(f"Refusing Supabase key with role {payload.get('role')!r}; use the anon key")
+    return json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))).get("role")
+
+
+def require_public_key(key: str) -> None:
+    """Refuse privileged keys for the public tables; they must only see what RLS exposes publicly."""
+    role = key_role(key)
+    if role != "anon":
+        raise ValueError(f"Refusing Supabase key with role {role!r} for public tables; use the anon key")
+
+
+def require_service_key(key: str) -> None:
+    """The service role key is only for PRIVATE_TABLES; it must really be one, or RLS returns nothing."""
+    role = key_role(key)
+    if role != "service_role":
+        raise ValueError(f"SUPABASE_SERVICE_ROLE_KEY has role {role!r}; expected the service role key")
+
+
+def read_only_request(url: str, key: str) -> urllib.request.Request:
+    """Build the only kind of request this script sends: a GET. The service role key could write, so nothing else."""
+    request = urllib.request.Request(url, method="GET", headers={
+        "apikey": key, "Authorization": f"Bearer {key}", "Prefer": "count=exact",
+    })
+    if request.get_method() != "GET" or request.data is not None:
+        raise RuntimeError("Refusing a non-GET request to Supabase")
+    return request
 
 
 def fetch_json(url: str, key: str):
     """Return (rows, total row count) for one PostgREST page."""
-    request = urllib.request.Request(url, headers={
-        "apikey": key, "Authorization": f"Bearer {key}", "Prefer": "count=exact",
-    })
+    request = read_only_request(url, key)
     with urllib.request.urlopen(request, timeout=60) as response:
         total = response.headers.get("Content-Range", "").rpartition("/")[2]
         return json.loads(response.read().decode("utf-8")), int(total)
 
 
-def fetch_table(base_url: str, key: str, table: str, columns: list, fetch=fetch_json) -> list:
+def fetch_table(base_url: str, key: str, table: str, columns: list, fetch=fetch_json, filters=None) -> list:
     rows = []
     while True:
         query = urllib.parse.urlencode({
-            "select": ",".join(columns), "order": "id.asc", "limit": PAGE_SIZE, "offset": len(rows),
+            **(filters or {}), "select": ",".join(columns), "order": "id.asc", "limit": PAGE_SIZE, "offset": len(rows),
         })
         page, total = fetch(f"{base_url}/rest/v1/{table}?{query}", key)
         rows.extend(page)
@@ -65,6 +98,15 @@ def fetch_table(base_url: str, key: str, table: str, columns: list, fetch=fetch_
     # A server-side row cap below PAGE_SIZE must not silently truncate the export.
     if len(rows) != total:
         raise ValueError(f"{table}: fetched {len(rows)} rows but the server reports {total}")
+    return rows
+
+
+def fetch_private_table(base_url: str, key: str, table: str, fetch=fetch_json) -> list:
+    spec = PRIVATE_TABLES[table]
+    rows = fetch_table(base_url, key, table, spec["columns"], fetch, spec["filters"])
+    # Defence in depth: never write a non-AI submission, even if the server-side filter were ignored.
+    if any(row.get("kalla") != "ai" for row in rows):
+        raise ValueError(f"{table}: received rows with kalla other than 'ai'; refusing to export them")
     return rows
 
 
@@ -95,8 +137,8 @@ def split_for(created: str, test_from: date, test_until: date | None = None) -> 
 
 
 def assign_splits(data: dict, test_from: date, test_until: date | None = None) -> dict:
-    for table in ("artiklar", "chatt_debatter", "markets"):
-        for row in data[table]:
+    for table in ("artiklar", "chatt_debatter", "markets", *PRIVATE_TABLES):
+        for row in data.get(table, ()):
             row["split"] = split_for(row["skapad"], test_from, test_until)
     # Bets follow their market, so a test market never leaks into training via its bets.
     market_split = {row["id"]: row["split"] for row in data["markets"]}
@@ -140,6 +182,9 @@ def verify_frozen(data: dict, frozen: dict) -> None:
     current = frozen_test_set(data, date.fromisoformat(frozen["test_from"]), date.fromisoformat(frozen["test_until"]),
                               frozen["mutable_columns"])
     for table, expected in frozen["tables"].items():
+        if table not in current["tables"]:
+            hint = " (set SUPABASE_SERVICE_ROLE_KEY)" if table in PRIVATE_TABLES else ""
+            raise ValueError(f"{table}: part of the frozen test set but not exported{hint}")
         got = current["tables"][table]
         missing = sorted(set(expected["ids"]) - set(got["ids"]))
         added = sorted(set(got["ids"]) - set(expected["ids"]))
@@ -147,6 +192,15 @@ def verify_frozen(data: dict, frozen: dict) -> None:
             raise ValueError(f"{table}: frozen test set changed (missing ids {missing[:10]}, new ids {added[:10]})")
         if got["sha256"] != expected["sha256"]:
             raise ValueError(f"{table}: content of frozen test rows changed")
+
+
+def frozen_additions(data: dict, frozen: dict) -> dict | None:
+    """Fingerprints, for the frozen window, of exported tables the frozen file does not cover yet."""
+    new = {table: rows for table, rows in data.items() if table not in frozen["tables"]}
+    if not new:
+        return None
+    return frozen_test_set(new, date.fromisoformat(frozen["test_from"]), date.fromisoformat(frozen["test_until"]),
+                           {table: MUTABLE_COLUMNS.get(table, set()) for table in new})
 
 
 def write_export(data: dict, output: Path, test_from: date, source: str, test_until: date | None = None) -> Path:
@@ -167,7 +221,7 @@ def write_export(data: dict, output: Path, test_from: date, source: str, test_un
             # Bets are counted under their market's month, matching how assign_splits splits them.
             "rows_by_month": monthly(market_month[row["market_id"]] if table == "agent_bets" else month_of(row["skapad"])
                                      for row in rows),
-            "columns": TABLES[table],
+            "columns": COLUMNS[table],
             "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         }
     files["markets"]["resolved_by_split"] = {
@@ -176,6 +230,12 @@ def write_export(data: dict, output: Path, test_from: date, source: str, test_un
     }
     files["markets"]["resolved_by_month"] = monthly(
         month_of(row["skapad"]) for row in data["markets"] if row["status"] == "avgjord")
+    if "inlamningar" in files:
+        # Accept/reject balance per split, needed to judge whether the editor test can measure rejections.
+        files["inlamningar"]["beslut_by_split"] = {
+            split: monthly(row["beslut"] for row in data["inlamningar"] if row["split"] == split)
+            for split in ("train", "test")
+        }
     manifest = {
         "schema_version": 1,
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -226,10 +286,22 @@ def main() -> None:
     require_public_key(key)
     test_from = args.test_from
     data = {table: fetch_table(base_url, key, table, columns) for table, columns in TABLES.items()}
+    # Optional: without it the export holds public tables only.
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if service_key:
+        require_service_key(service_key)
+        for table in PRIVATE_TABLES:
+            data[table] = fetch_private_table(base_url, service_key, table)
+    else:
+        print("SUPABASE_SERVICE_ROLE_KEY not set; skipping " + ", ".join(PRIVATE_TABLES))
     assign_splits(data, test_from, args.test_until)
     if frozen:
         verify_frozen(data, frozen)
     print(write_export(data, args.output, test_from, base_url, args.test_until))
+    additions = frozen and frozen_additions(data, frozen)
+    if additions:
+        # Not yet frozen: printed so the tables can be added to the frozen file for the same window.
+        print("FROZEN_TEST_SET_ADDITIONS " + json.dumps(additions, ensure_ascii=False, separators=(",", ":")))
     if args.write_frozen:
         frozen = frozen_test_set(data, test_from, args.test_until)
         args.write_frozen.write_text(json.dumps(frozen, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

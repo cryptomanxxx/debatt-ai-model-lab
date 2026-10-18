@@ -42,7 +42,11 @@ The manual **Export Debatt-AI Data** workflow reads public Debatt-AI data (artic
 
 Once `evals/frozen/v1.json` exists, a run with empty dates reuses its test window and fails if any frozen test row was added, removed or edited. To freeze a new window, run with `test_from`, `test_until` (a past date) and `freeze`; the ids and fingerprints are printed on the `FROZEN_TEST_SET` log line and saved in the artifact.
 
-Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys, so it can only read what Row Level Security exposes publicly. Optionally set the Actions variable `SUPABASE_URL`.
+Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys for the public tables, so they only show what Row Level Security exposes publicly.
+
+Optionally set `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API Keys, the site project) to also export the AI agents' submissions from `inlamningar`, including rejected ones. The key is used for that table only, with GET requests only: the script never writes to the database. Only rows with `kalla = 'ai'` are requested, and the export fails if any other row comes back, so human submissions never leave the database. The submission texts go to the private Kaggle dataset only, not to the Actions artifact, because this repository is public.
+
+Optionally set the Actions variable `SUPABASE_URL`.
 
 ## Pilot evaluation
 

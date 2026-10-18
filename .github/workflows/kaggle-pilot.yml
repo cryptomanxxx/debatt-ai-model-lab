@@ -19,6 +19,8 @@ jobs:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://fmwxftnistkoqazfwnuj.supabase.co' }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      # Optional, read-only (GET): AI-agent submissions for the private Kaggle dataset only.
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       KAGGLE_KERNEL_SLUG: debatt-ai-pilot-gpu
       KAGGLE_RESULT_FILE: pilot_results.json
       EXPERIMENT_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
