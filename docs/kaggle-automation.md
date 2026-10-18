@@ -1,6 +1,6 @@
 # Kaggle GPU automation (manual GitHub Action)
 
-This workflow is **opt-in** using GitHub Actions → **Kaggle GPU Smoke Test** → **Run workflow**.
+This workflow is **opt-in** using GitHub Actions → **AI Model Smoke Test (Kaggle GPU)** → **Run workflow**.
 It uploads a private GPU kernel, runs the script from the exact public repository commit,
 polls the kernel status, downloads its JSON output and saves it as a GitHub Actions artifact.
 
