@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.train_editor import (compare, encode_example, load_config, paired_bootstrap, split_training, target_text,
+from scripts.train_editor import (compare, encode_example, group_size, load_config, paired_bootstrap, split_training, target_text,
                                   training_examples)
 
 SCORES = ("arg", "ori", "rel", "tro")
@@ -55,3 +55,8 @@ def test_paired_bootstrap_sign_and_interval():
     items = [dict.fromkeys(SCORES, 5)] * 4
     diff = compare(items, [None] * 4, [dict.fromkeys(SCORES, 5)] * 4, dict.fromkeys(SCORES, 7), 100, 1)
     assert diff["arg"]["mae_diff"] == pytest.approx(-2.0)
+
+
+def test_final_partial_group_is_averaged_over_its_own_size():
+    assert [group_size(i, 10, 4) for i in range(1, 11)] == [4] * 8 + [2, 2]
+    assert [group_size(i, 3, 8) for i in (1, 2, 3)] == [3, 3, 3]

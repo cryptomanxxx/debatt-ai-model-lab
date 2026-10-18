@@ -63,6 +63,12 @@ def encode_example(prompt_ids: list, target_ids: list, max_tokens: int):
     return {"input_ids": prompt_ids + target_ids, "labels": [-100] * len(prompt_ids) + target_ids}
 
 
+def group_size(index: int, total: int, accum: int) -> int:
+    """Size of the gradient-accumulation group that 1-based example index belongs to."""
+    start = (index - 1) // accum * accum
+    return min(accum, total - start)
+
+
 def paired_bootstrap(truth: list, base: list, tuned: list, samples: int, seed: int) -> dict:
     """MAE(tuned) - MAE(base) with a 95% percentile interval; negative means the tuned model is better."""
     rng = random.Random(seed)
@@ -168,12 +174,14 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
     losses, step = [], 0
     for _ in range(config["epochs"]):
         for i, example in enumerate(encoded, 1):
+            # Average over the actual group, so a final partial group weighs as much as a full one.
+            group = group_size(i, len(encoded), config["grad_accum"])
             ids = torch.tensor([example["input_ids"]], device=model.device)
             labels = torch.tensor([example["labels"]], device=model.device)
             with torch.autocast("cuda", dtype=torch.float16):
-                loss = model(input_ids=ids, labels=labels).loss / config["grad_accum"]
+                loss = model(input_ids=ids, labels=labels).loss / group
             scaler.scale(loss).backward()
-            losses.append(loss.item() * config["grad_accum"])
+            losses.append(loss.item() * group)
             if i % config["grad_accum"] == 0 or i == len(encoded):
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
@@ -182,8 +190,7 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
                 optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
                 step += 1
-                print(f"step {step}/{total} loss {sum(losses[-config['grad_accum']:]) / config['grad_accum']:.4f}",
-                      flush=True)
+                print(f"step {step}/{total} loss {sum(losses[-group:]) / group:.4f}", flush=True)
     # The adapter stays in the private Kaggle output; the public workflow artifact uploads JSON and logs only.
     model.save_pretrained(output.parent / "editor-adapter")
     tuned = evaluate()
