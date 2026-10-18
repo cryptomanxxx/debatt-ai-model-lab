@@ -67,14 +67,18 @@ def training_examples(rows: list, published_sample: int, held_share: float, seed
     return examples, weight
 
 
-def short_reasoning(text: str, max_chars: int) -> str:
-    """The editor's motivering, cut at the last sentence end that fits, or hard at max_chars without one."""
+def short_reasoning(text: str, max_chars: int, max_sentences: int = 2) -> str:
+    """The editor's motivering, at most max_sentences sentences (as the prompt asks) and max_chars characters.
+
+    Cut at the last sentence end that fits, or hard at max_chars when no sentence end does."""
     text = " ".join((text or "").split())
+    ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", text)]
+    if len(ends) > max_sentences:
+        text = text[:ends[max_sentences - 1]]
     if len(text) <= max_chars:
         return text
-    cut = text[:max_chars]
-    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
-    return cut[:end + 1] if end > 0 else cut
+    fitting = [end for end in ends if end <= max_chars]
+    return text[:fitting[-1]] if fitting else text[:max_chars]
 
 
 def target_text(row: dict, reasoning: bool = False, max_reasoning_chars: int = 300) -> str:
