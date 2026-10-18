@@ -82,10 +82,22 @@ def check_provenance(data_dir: Path, run_id: str, frozen: dict) -> None:
         raise RuntimeError("Dataset is not the frozen test set")
 
 
+def is_film_review(row: dict) -> bool:
+    return row.get("filmrecension") is True
+
+
 def editor_items(articles: list, sample: int, seed: int) -> list:
-    scored = [a for a in articles if a["split"] == "test" and all(isinstance(a.get(k), int) for k in SCORES)]
+    # Film reviews are scored as their own task: the training split has none, so they would mix a new genre in.
+    scored = [a for a in articles if a["split"] == "test" and not is_film_review(a)
+              and all(isinstance(a.get(k), int) for k in SCORES)]
     scored.sort(key=lambda a: a["id"])
     return random.Random(seed).sample(scored, min(sample, len(scored)))
+
+
+def film_review_items(articles: list) -> list:
+    """Every published test film review, scored like the editor task but reported apart."""
+    return sorted((a for a in articles if a["split"] == "test" and is_film_review(a)
+                   and all(isinstance(a.get(k), int) for k in SCORES)), key=lambda a: a["id"])
 
 
 def submission_items(submissions: list, sample: int, seed: int) -> list:
@@ -93,8 +105,9 @@ def submission_items(submissions: list, sample: int, seed: int) -> list:
 
     Published submissions outnumber the rest about six to one, so a plain sample would hold few rejections.
     The metrics that use the decision are per class, so the mix does not bias them."""
-    scored = sorted((s for s in submissions if s["split"] == "test" and s.get("beslut") in DECISIONS
-                     and all(isinstance(s.get(k), int) for k in SCORES)), key=lambda s: s["id"])
+    scored = sorted((s for s in submissions if s["split"] == "test" and not is_film_review(s)
+                     and s.get("beslut") in DECISIONS and all(isinstance(s.get(k), int) for k in SCORES)),
+                    key=lambda s: s["id"])
     held = [s for s in scored if s["beslut"] != "publicera"]
     published = [s for s in scored if s["beslut"] == "publicera"]
     rng = random.Random(seed)
@@ -277,7 +290,7 @@ def resolve_revision(model_id: str, revision):
     return HfApi().model_info(model_id).sha
 
 
-def run_model(spec: dict, config: dict, editor: list, submissions: list, markets: list, fallback: dict,
+def run_model(spec: dict, config: dict, editor: list, films: list, submissions: list, markets: list, fallback: dict,
               submission_fallback: dict, consensus_ids: set, torch) -> dict:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -299,10 +312,12 @@ def run_model(spec: dict, config: dict, editor: list, submissions: list, markets
 
     # Each prompt is dated at its item's creation, so the "today" a template inserts matches what the item knew.
     editor_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in editor]
+    film_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in films]
     submission_raw = [generate(editor_prompt(s, config["max_article_chars"]), utc_day(s["skapad"]), 64)
                       for s in submissions]
     market_raw = [generate(market_prompt(m), utc_day(m["skapad"]), 32) for m in markets]
     editor_pred = [parse_scores(text) for text in editor_raw]
+    film_pred = [parse_scores(text) for text in film_raw]
     submission_pred = [parse_scores(text) for text in submission_raw]
     market_pred = [parse_probability(text) for text in market_raw]
     del model
@@ -310,10 +325,12 @@ def run_model(spec: dict, config: dict, editor: list, submissions: list, markets
     return {
         "id": spec["id"], "revision": revision,
         "editor": editor_metrics(editor, editor_pred, fallback),
+        "film_reviews": editor_metrics(films, film_pred, fallback),
         "submissions": submission_metrics(submissions, submission_pred, submission_fallback),
         "markets": market_metrics(markets, market_pred, consensus_ids),
         "predictions": {
             "editor": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(editor, editor_raw, editor_pred)],
+            "film_reviews": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(films, film_raw, film_pred)],
             # No raw replies: a model may echo the unpublished submission, and the results go to a public artifact.
             "submissions": [{"id": s["id"], "scores": p} for s, p in zip(submissions, submission_pred)],
             "markets": [{"id": m["id"], "raw": raw, "probability": p} for m, raw, p in zip(markets, market_raw, market_pred)],
@@ -341,6 +358,7 @@ def main() -> None:
     bets = read_jsonl(data_dir / "agent_bets.jsonl")
     submissions_all = read_jsonl(data_dir / "inlamningar.jsonl")
     editor = editor_items(articles, config["editor_sample"], config["seed"])
+    films = film_review_items(articles)
     submissions = submission_items(submissions_all, config["submission_sample"], config["seed"])
     markets = market_items(markets_all)
     fallback = train_mean_scores(articles)
@@ -351,14 +369,16 @@ def main() -> None:
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
-        "config": config, "editor_items": len(editor), "submission_items": len(submissions),
+        "config": config, "editor_items": len(editor), "film_review_items": len(films),
+        "submission_items": len(submissions),
         "market_items": len(markets),
         "baselines": market_baselines | {
             "editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback),
+            "film_reviews_train_mean": editor_metrics(films, [None] * len(films), fallback),
             "submissions_train_mean": submission_metrics(submissions, [None] * len(submissions), submission_fallback),
         },
-        "models": [run_model(spec, config, editor, submissions, markets, fallback, submission_fallback, consensus_ids,
-                             torch) for spec in config["models"]],
+        "models": [run_model(spec, config, editor, films, submissions, markets, fallback, submission_fallback,
+                             consensus_ids, torch) for spec in config["models"]],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
