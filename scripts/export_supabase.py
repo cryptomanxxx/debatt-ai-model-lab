@@ -35,6 +35,10 @@ PRIVATE_TABLES = {
 }
 COLUMNS = {**TABLES, **{table: spec["columns"] for table, spec in PRIVATE_TABLES.items()}}
 
+# Boolean columns that decide which evaluation task a row belongs to. The ids of test rows where they are true are
+# frozen too, so a corrected flag cannot silently move a row between tasks under the same frozen-set version.
+FLAG_COLUMNS = {"artiklar": ["filmrecension"], "inlamningar": ["filmrecension"]}
+
 # Columns that legitimately change after a row is created (read counts, market resolution).
 # They are left out of the frozen test-set fingerprint so the set stays verifiable over time.
 MUTABLE_COLUMNS = {"artiklar": {"lasningar"}, "markets": {"resolution_kalla", "status", "utfall"},
@@ -165,6 +169,10 @@ def fingerprint(table: str, rows: list, mutable_columns: dict, columns=None) -> 
     return hashlib.sha256("".join(f"{row_id}\t{body}\n" for row_id, body in lines).encode("utf-8")).hexdigest()
 
 
+def flag_ids(rows: list, columns: list) -> dict:
+    return {column: sorted(row["id"] for row in rows if row.get(column) is True) for column in columns}
+
+
 def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_columns: dict = MUTABLE_COLUMNS,
                     columns: dict | None = None) -> dict:
     """Ids and fingerprints of the test rows; columns (default: the export's) records what the hash covers."""
@@ -174,6 +182,8 @@ def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_colum
         cols = (columns or {}).get(table, COLUMNS.get(table))
         tables[table] = {"ids": sorted(row["id"] for row in test), "columns": cols,
                          "sha256": fingerprint(table, test, mutable_columns, cols)}
+        if table in FLAG_COLUMNS:
+            tables[table]["flags"] = flag_ids(test, FLAG_COLUMNS[table])
     return {
         "schema_version": 1,
         "test_from": test_from.isoformat(),
@@ -201,6 +211,20 @@ def verify_frozen(data: dict, frozen: dict) -> None:
             raise ValueError(f"{table}: frozen test set changed (missing ids {missing[:10]}, new ids {added[:10]})")
         if got["sha256"] != expected["sha256"]:
             raise ValueError(f"{table}: content of frozen test rows changed")
+        test = [row for row in data[table] if row["split"] == "test"]
+        for column, ids in expected.get("flags", {}).items():
+            if flag_ids(test, [column])[column] != ids:
+                raise ValueError(f"{table}: frozen {column} flags changed")
+
+
+def frozen_flag_additions(data: dict, frozen: dict) -> dict | None:
+    """Flag ids of frozen tables whose frozen file does not record them yet."""
+    additions = {}
+    for table, spec in frozen["tables"].items():
+        missing = [c for c in FLAG_COLUMNS.get(table, []) if c not in spec.get("flags", {})]
+        if missing and table in data:
+            additions[table] = flag_ids([row for row in data[table] if row["split"] == "test"], missing)
+    return additions or None
 
 
 def frozen_additions(data: dict, frozen: dict) -> dict | None:
@@ -322,6 +346,9 @@ def main() -> None:
     if additions:
         # Not yet frozen: printed so the tables can be added to the frozen file for the same window.
         print("FROZEN_TEST_SET_ADDITIONS " + json.dumps(additions, ensure_ascii=False, separators=(",", ":")))
+    flag_additions = frozen and frozen_flag_additions(data, frozen)
+    if flag_additions:
+        print("FROZEN_FLAG_ADDITIONS " + json.dumps(flag_additions, ensure_ascii=False, separators=(",", ":")))
     if args.write_frozen:
         frozen = frozen_test_set(data, test_from, args.test_until)
         args.write_frozen.write_text(json.dumps(frozen, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

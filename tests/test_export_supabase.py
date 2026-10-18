@@ -302,3 +302,24 @@ def test_film_reviews_are_counted(tmp_path):
     out = write_export(data, tmp_path / "export", window()[0], "https://x.supabase.co", window()[1])
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["files"]["artiklar"]["filmrecension_by_split"] == {"train": 0, "test": 1}
+
+
+def test_frozen_flags_catch_a_row_moving_between_tasks():
+    data = assign_splits(sample(), *window())
+    data["artiklar"][1]["filmrecension"] = True
+    frozen = frozen_test_set(data, *window(), columns={t: ["id", "skapad", "status", "market_id"] for t in data})
+    assert frozen["tables"]["artiklar"]["flags"] == {"filmrecension": [2]}
+    verify_frozen(data, frozen)
+    data["artiklar"][1]["filmrecension"] = False
+    with pytest.raises(ValueError, match="frozen filmrecension flags changed"):
+        verify_frozen(data, frozen)
+
+
+def test_missing_flags_are_reported_for_freezing():
+    data = assign_splits(sample(), *window())
+    data["artiklar"][1]["filmrecension"] = True
+    frozen = frozen_test_set(data, *window())
+    del frozen["tables"]["artiklar"]["flags"]
+    assert export_supabase.frozen_flag_additions(data, frozen) == {"artiklar": {"filmrecension": [2]}}
+    frozen["tables"]["artiklar"]["flags"] = {"filmrecension": [2]}
+    assert export_supabase.frozen_flag_additions(data, frozen) is None
