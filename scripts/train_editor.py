@@ -67,12 +67,28 @@ def training_examples(rows: list, published_sample: int, held_share: float, seed
     return examples, weight
 
 
+# Swedish abbreviations whose final period is not a sentence end (multi-part ones like t.ex. are caught by pattern).
+ABBREVIATIONS = {"dvs", "osv", "etc", "ca", "nr", "resp", "jfr", "kap", "st", "tex", "bla", "mfl", "sk", "pga"}
+
+
+def sentence_ends(text: str) -> list:
+    """Offsets just after each sentence end: ., ! or ? before a capital letter, digit or the end of the text,
+    unless the period closes an abbreviation such as t.ex., bl.a. or dvs."""
+    ends = []
+    for match in re.finditer(r"[.!?](?=\s+[A-ZÅÄÖ0-9\"(]|\s*$)", text):
+        word = re.search(r"(\S*)$", text[:match.start()]).group(1).lower()
+        if match.group() == "." and (word in ABBREVIATIONS or re.fullmatch(r"(?:\w{1,3}\.)+\w{1,3}", word)):
+            continue
+        ends.append(match.end())
+    return ends
+
+
 def short_reasoning(text: str, max_chars: int, max_sentences: int = 2) -> str:
     """The editor's motivering, at most max_sentences sentences (as the prompt asks) and max_chars characters.
 
     Cut at the last sentence end that fits, or hard at max_chars when no sentence end does."""
     text = " ".join((text or "").split())
-    ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", text)]
+    ends = sentence_ends(text)
     if len(ends) > max_sentences:
         text = text[:ends[max_sentences - 1]]
     if len(text) <= max_chars:

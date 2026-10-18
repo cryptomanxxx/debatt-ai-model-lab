@@ -41,12 +41,15 @@ def test_held_submissions_are_weighted_up_to_the_target_share():
 
 
 def test_reasoning_target_keeps_the_editor_motivering_short():
-    row = submission(1, "avvisa", "2026-07-01", motivering="Svag källa.  Oklar tes! " + "x" * 400)
+    row = submission(1, "avvisa", "2026-07-01", motivering="Svag källa.  Oklar tes! " + "X" * 400)
     assert short_reasoning(row["motivering"], 30) == "Svag källa. Oklar tes!"
     assert short_reasoning("abcdefghij", 5) == "abcde"
     # The prompt asks for at most two sentences, so the target never has more.
     assert short_reasoning("Ett. Två! Tre? Fyra.", 300) == "Ett. Två!"
     assert short_reasoning("Version 2.5 är bra. Men oklar.", 300) == "Version 2.5 är bra. Men oklar."
+    # Abbreviations are not sentence ends, so two real sentences survive whole.
+    text = "Bra källor, t.ex. SCB och bl.a. Riksbanken, dvs. Stark tes. Svag slutsats. Tredje."
+    assert short_reasoning(text, 300) == "Bra källor, t.ex. SCB och bl.a. Riksbanken, dvs. Stark tes. Svag slutsats."
     target = json.loads(target_text(row, reasoning=True, max_reasoning_chars=30))
     assert list(target) == ["motivering", "arg", "ori", "rel", "tro"] and target["motivering"] == "Svag källa. Oklar tes!"
     # Without reasoning the answer is the four scores only, as in the pilot prompt.
