@@ -73,7 +73,8 @@ def test_metrics():
     markets = [{"id": 1, "utfall": "ja"}, {"id": 2, "utfall": "nej"}]
     result = market_metrics(markets, [1.0, None], {2})
     assert (result["parsed"], result["brier"], result["brier_consensus_markets"]) == (1, 0.125, 0.25)
-    assert result["distinct_predictions"] == 2
+    # Only the one parsed answer counts as a model answer; the 50% fallback does not.
+    assert result["distinct_predictions"] == 1
 
 
 def test_train_mean_fallback():
@@ -125,3 +126,12 @@ def test_prompts_contain_no_copyable_example_values():
     assert '"arg": A' in prompt and not re.search(r'"(arg|ori|rel|tro)":\s*\d', prompt)
     market = {"skapad": "2026-09-14T10:00:00+00:00", "titel": "T", "beskrivning": "B", "deadline": "2026-12-31"}
     assert not re.search(r'"sannolikhet":\s*\d', market_prompt(market))
+
+
+def test_fallback_is_not_counted_as_an_answer():
+    items = [article(i, arg=v) for i, v in enumerate([6, 7, 8])]
+    copied, fallback = {"arg": 8, "ori": 7, "rel": 9, "tro": 8}, {"arg": 5, "ori": 5, "rel": 5, "tro": 5}
+    metrics = editor_metrics(items, [copied, copied, None], fallback)
+    assert metrics["distinct_predictions"] == 1 and metrics["arg"]["prediction_std"] == 0
+    nothing = editor_metrics(items, [None] * 3, fallback)
+    assert nothing["distinct_predictions"] is None and nothing["arg"]["prediction_std"] is None

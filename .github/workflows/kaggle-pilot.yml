@@ -58,9 +58,9 @@ jobs:
           print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
           for m in r["models"]:
               e, mk = m["editor"], m["markets"]
-              print(f"| {m['id']} | {e['parsed']}/{e['n']} | {e['distinct_predictions']} | {' / '.join(f(e[x]['mae']) for x in k)} "
+              print(f"| {m['id']} | {e['parsed']}/{e['n']} | {e['distinct_predictions'] if e['distinct_predictions'] is not None else '-'} | {' / '.join(f(e[x]['mae']) for x in k)} "
                     f"| {' / '.join(f(e[x]['spearman']) for x in k)} | {' / '.join(f(e[x]['prediction_std']) for x in k)} "
-                    f"| {mk['parsed']}/{mk['n']} | {mk['distinct_predictions']} | {f(mk['brier'])} | {f(mk['brier_consensus_markets'])} |")
+                    f"| {mk['parsed']}/{mk['n']} | {mk['distinct_predictions'] if mk['distinct_predictions'] is not None else '-'} | {f(mk['brier'])} | {f(mk['brier_consensus_markets'])} |")
           t = b["editor_train_mean"]
           print(f"\nEditor truth spread (std) arg/ori/rel/tro: {' / '.join(f(t[x]['truth_std']) for x in k)}")
           print(f"\nBaselines: editor training mean → MAE {' / '.join(f(t[x]['mae']) for x in k)}; "
@@ -68,7 +68,7 @@ jobs:
                 f"{f(b['base_rate_brier_consensus_markets'])} (consensus markets); "
                 f"agent consensus (bets by creation day) Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
           print("\nUnparsable replies are scored, not dropped: training-mean scores for the editor, 50% for markets.")
-          print("A model with 1 distinct answer is repeating itself; its MAE says nothing about individual items.\n")
+          print("Distinct answers and spread count parsed replies only. A model with 1 distinct answer is repeating itself; its MAE says nothing about individual items.\n")
           for m in r["models"]:
               print(f"Revision {m['id']}: `{m['revision']}`  ")
           PY
