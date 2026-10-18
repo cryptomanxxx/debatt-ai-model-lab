@@ -52,7 +52,7 @@ Source: Supabase REST, via `scripts/export_supabase.py` and the manual **Export 
 
 Rules:
 
-1. **Public data only.** The export uses the anon key (refuses service-role and secret keys) and explicit column allowlists. `inlamningar` (all submissions, including **unpublished human texts with author names**) is not exported; see open questions.
+1. **Public data, plus AI-agent submissions.** Public tables are read with the anon key (refuses service-role and secret keys) and explicit column allowlists. `inlamningar` holds all submissions, including **unpublished human texts with author names**, and is hidden from anon by RLS. With the optional `SUPABASE_SERVICE_ROLE_KEY` the export reads only its AI-agent rows (`kalla = 'ai'`, accepted and rejected), with GET requests only, and fails if any other row comes back. Older rows without `kalla` are skipped. Their texts go to the private Kaggle dataset, never to the public Actions artifact. **The model lab never writes to Debatt-AI's databases.**
 2. **Never committed.** Exports go to time-limited Actions artifacts. `data/` is gitignored.
 3. **Time split, never random.** Rows created before `test_from` are training data; rows created from `test_from` through `test_until` are the held-out test set; newer rows are excluded from both, so they can never leak into training. Bets follow their market; bets placed after `test_until` are excluded. The test set is never used for training.
 4. **Frozen test set v1: 2026-09-01 through 2026-10-16 (UTC).** Chosen from the first export's monthly counts: about 30% of articles, 22% of debates and 26% of resolved markets (75 of 289) fall in the window. Its row ids and content fingerprints are in `evals/frozen/v1.json`, taken from freeze run [39080226140](https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/39080226140): 661 articles, 50 debates, 158 markets (75 resolved at freeze time) and 629 bets. Every export with empty dates verifies it and fails if a test row was added, removed or edited. Read counts and market resolution (`lasningar`, `status`, `utfall`, `resolution_kalla`) are excluded from the fingerprint: markets that are still open stay in the test set and count once they resolve.
@@ -65,7 +65,7 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 
 | Area | Test data | Metric | Judge |
 | --- | --- | --- | --- |
-| Editor | test-split articles with editor scores | mean absolute error and Spearman correlation per score dimension; accept/reject accuracy once rejected examples are available | none |
+| Editor | test-split articles and AI-agent submissions (accepted and rejected) with editor scores | mean absolute error and Spearman correlation per score dimension; accept/reject accuracy once rejected examples are available | none |
 | Article writing | prompts built from test-split news sources | pairwise win rate vs. baseline; count of invented sources/studies/statistics | free LLM judge + human spot checks |
 | Direct debate | sample of test-split debates | pairwise win rate, persona consistency | free LLM judge + human spot checks |
 | Prediction markets | test-split resolved markets | Brier score vs. agent consensus and vs. base rate; calibration curve | none |
@@ -101,5 +101,5 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 
 ## 10. Open questions
 
-- **Rejected submissions.** Accept/reject accuracy needs rejected examples from `inlamningar`. Options: export only rejected AI-agent submissions, or only scores without text. Separately, confirm that `inlamningar` text is not readable with the public anon key, since it holds unpublished human texts.
+- **Rejected submissions.** Decided: AI-agent submissions are exported read-only with the service role key (rule 1). Once the first export with the key has run, `inlamningar` is added to the frozen test set v1 for the same window (the export logs its ids and fingerprints as `FROZEN_TEST_SET_ADDITIONS`) and the pilot's editor test uses it.
 - **Judge keys.** Which existing free API keys may this repository use as Actions secrets?
