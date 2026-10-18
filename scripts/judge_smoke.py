@@ -15,6 +15,16 @@ class SmokeError(Exception):
     """Carries only a short code: provider errors and exceptions can echo credentials, so they are never shown."""
 
 
+class RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib copies the Authorization header into redirects, even to another host; never follow one."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SmokeError(f"redirect_{code}")
+
+
+OPENER = urllib.request.build_opener(RefuseRedirects)
+
+
 def request_json(base_url: str, key: str, path: str, payload: dict | None = None) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
@@ -22,8 +32,10 @@ def request_json(base_url: str, key: str, path: str, payload: dict | None = None
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(base_url + path, data=data, headers=headers, method="POST" if data else "GET")
     try:
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with OPENER.open(req, timeout=90) as response:
             body = response.read(MAX_RESPONSE_BYTES + 1)
+    except SmokeError:
+        raise
     except urllib.error.HTTPError as error:
         raise SmokeError(f"http_{error.code}") from None
     except Exception as error:
@@ -65,6 +77,9 @@ def check_judge(role: str, judge: dict, key: str, request=request_json) -> dict:
         result.update(ok=True, status="ok")
     except SmokeError as error:
         result["status"] = str(error)
+    except (AttributeError, KeyError, IndexError, TypeError):
+        # Valid JSON of an unexpected shape fails this judge only; the other judge is still checked.
+        result["status"] = "invalid_response"
     return result
 
 

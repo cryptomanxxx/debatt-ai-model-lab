@@ -1,7 +1,9 @@
 """Tests for the judge API smoke test; no network access."""
 import json
 
-from scripts.judge_smoke import SmokeError, check_judge, summary_markdown
+import urllib.request
+
+from scripts.judge_smoke import OPENER, RefuseRedirects, SmokeError, check_judge, summary_markdown
 
 JUDGE = {"provider": "hip", "base_url": "https://example.test/v1", "secret": "HIP_API_KEY", "model": "Kimi-K2.6"}
 KEY = "secret-key-123"
@@ -61,3 +63,23 @@ def test_committed_judge_config():
     judges = json.loads(open("configs/judges.json", encoding="utf-8").read())
     assert {j["secret"] for j in judges.values()} == {"HIP_API_KEY", "BLABLADOR_API_KEY"}
     assert all(j["base_url"].startswith("https://") for j in judges.values())
+
+
+def test_malformed_responses_fail_only_that_judge():
+    def bad_list(base_url, key, path, payload=None):
+        return [] if path == "/models" else {}
+    def null_choices(base_url, key, path, payload=None):
+        return {"data": [{"id": "Kimi-K2.6"}]} if path == "/models" else {"choices": [None]}
+    assert check_judge("primary", JUDGE, KEY, bad_list)["status"] == "invalid_response"
+    assert check_judge("primary", JUDGE, KEY, null_choices)["status"] == "invalid_response"
+
+
+def test_redirects_are_refused_so_the_key_is_never_forwarded():
+    assert any(isinstance(h, RefuseRedirects) for h in OPENER.handlers)
+    req = urllib.request.Request("https://example.test/v1/models", headers={"Authorization": "Bearer " + KEY})
+    try:
+        RefuseRedirects().redirect_request(req, None, 302, "Found", {}, "https://evil.test/")
+    except SmokeError as error:
+        assert str(error) == "redirect_302"
+    else:
+        raise AssertionError("redirect was followed")
