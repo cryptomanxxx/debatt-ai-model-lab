@@ -27,8 +27,6 @@ jobs:
       # Public tables are read with the anon key: exactly what RLS exposes on debatt-ai.se.
       SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://fmwxftnistkoqazfwnuj.supabase.co' }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      # Optional, read-only (GET): AI-agent submissions in inlamningar, which RLS hides from anon.
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TEST_FROM: ${{ inputs.test_from }}
       TEST_UNTIL: ${{ inputs.test_until }}
       FREEZE: ${{ inputs.freeze }}
@@ -40,6 +38,10 @@ jobs:
       - name: Ensure credentials are set
         run: test -n "$SUPABASE_ANON_KEY" || { echo "::error::SUPABASE_ANON_KEY secret missing"; exit 1; }
       - name: Export time-split dataset
+        env:
+          # Optional, read-only (GET): AI-agent submissions in inlamningar, which RLS hides from anon.
+          # Step scope, so no other step or action sees the key.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           out="data/export-${GITHUB_RUN_ID}"
           args=(--output "$out")
