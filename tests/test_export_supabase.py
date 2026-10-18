@@ -276,3 +276,29 @@ def test_additions_cover_only_tables_the_frozen_file_lacks():
     assert additions["tables"]["inlamningar"]["ids"] == [6]
     assert additions["mutable_columns"] == {"inlamningar": ["status"]}
     assert export_supabase.frozen_additions(assign_splits(sample(), *window()), frozen) is None
+
+
+def test_a_newly_exported_column_keeps_the_frozen_set_valid():
+    data = assign_splits(sample(), *window())
+    frozen = frozen_test_set(data, *window(), columns={t: ["id", "skapad", "status", "market_id"] for t in data})
+    for row in data["artiklar"]:
+        row["filmrecension"] = False
+    verify_frozen(data, frozen)
+    data["artiklar"][1]["skapad"] = "2026-09-01T00:00:01+00:00"
+    with pytest.raises(ValueError, match="content of frozen test rows changed"):
+        verify_frozen(data, frozen)
+
+
+def test_committed_frozen_set_v1_records_its_columns():
+    frozen = json.loads(open("evals/frozen/v1.json", encoding="utf-8").read())
+    for table, spec in frozen["tables"].items():
+        # v1 was hashed before filmrecension was exported; every other exported column is covered.
+        assert spec["columns"] == [c for c in export_supabase.COLUMNS[table] if c != "filmrecension"]
+
+
+def test_film_reviews_are_counted(tmp_path):
+    data = assign_splits(sample(), *window())
+    data["artiklar"][1]["filmrecension"] = True
+    out = write_export(data, tmp_path / "export", window()[0], "https://x.supabase.co", window()[1])
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["files"]["artiklar"]["filmrecension_by_split"] == {"train": 0, "test": 1}

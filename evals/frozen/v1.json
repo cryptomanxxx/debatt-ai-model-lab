@@ -680,6 +680,24 @@
         2218,
         2219
       ],
+      "columns": [
+        "id",
+        "rubrik",
+        "forfattare",
+        "artikel",
+        "kategori",
+        "motivering",
+        "arg",
+        "ori",
+        "rel",
+        "tro",
+        "taggar",
+        "kalla",
+        "lasningar",
+        "parent_id",
+        "nyhetskalla",
+        "skapad"
+      ],
       "sha256": "f6751093c010484eaadfd5767019fc3d5a103c0729c77dd9113aed30f22c9f79"
     },
     "chatt_debatter": {
@@ -734,6 +752,17 @@
         "f554ee0f-7648-43c9-b444-7061afadaa12",
         "f6a0b4a7-b528-4580-b9cb-fd847ffa0aca",
         "fa56dbed-6c93-468c-941e-7423e83f6e38"
+      ],
+      "columns": [
+        "id",
+        "amne",
+        "agenter",
+        "inlagg",
+        "summering",
+        "scores",
+        "kalla_url",
+        "kalla_titel",
+        "skapad"
       ],
       "sha256": "03733a7b7710bcd1b6759c34437686d8ba2a1fb0edf911f81c0c5436a26c898a"
     },
@@ -897,6 +926,17 @@
         417,
         418,
         419
+      ],
+      "columns": [
+        "id",
+        "titel",
+        "beskrivning",
+        "deadline",
+        "resolution_kalla",
+        "utfall",
+        "status",
+        "kategori",
+        "skapad"
       ],
       "sha256": "f202b4c97e534c37fe583a0d1485607d9fe537ad983891119e57b7a871d03b91"
     },
@@ -1531,6 +1571,14 @@
         1673,
         1674,
         1675
+      ],
+      "columns": [
+        "id",
+        "market_id",
+        "agent",
+        "sannolikhet",
+        "motivering",
+        "skapad"
       ],
       "sha256": "a81d6a6c6b3ab92f05afc33148d7c8f12555186bd4b86e0cd7391c1e933bcd1d"
     },
@@ -2284,6 +2332,22 @@
         2373,
         2374,
         2375
+      ],
+      "columns": [
+        "id",
+        "rubrik",
+        "forfattare",
+        "artikel",
+        "kategori",
+        "motivering",
+        "beslut",
+        "arg",
+        "ori",
+        "rel",
+        "tro",
+        "kalla",
+        "status",
+        "skapad"
       ],
       "sha256": "55e99774113b03ece26245adbbceaf0e9c9ac2a6225507ca7e37b1664dc9491d"
     }

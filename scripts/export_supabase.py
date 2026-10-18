@@ -17,7 +17,7 @@ PAGE_SIZE = 1000
 # PostgREST rejects unknown columns, so a schema change fails the export.
 TABLES = {
     "artiklar": ["id", "rubrik", "forfattare", "artikel", "kategori", "motivering", "arg", "ori", "rel", "tro",
-                 "taggar", "kalla", "lasningar", "parent_id", "nyhetskalla", "skapad"],
+                 "taggar", "kalla", "lasningar", "parent_id", "nyhetskalla", "filmrecension", "skapad"],
     "chatt_debatter": ["id", "amne", "agenter", "inlagg", "summering", "scores", "kalla_url", "kalla_titel", "skapad"],
     "markets": ["id", "titel", "beskrivning", "deadline", "resolution_kalla", "utfall", "status", "kategori", "skapad"],
     "agent_bets": ["id", "market_id", "agent", "sannolikhet", "motivering", "skapad"],
@@ -29,7 +29,7 @@ TABLES = {
 PRIVATE_TABLES = {
     "inlamningar": {
         "columns": ["id", "rubrik", "forfattare", "artikel", "kategori", "motivering", "beslut", "arg", "ori", "rel",
-                    "tro", "kalla", "status", "skapad"],
+                    "tro", "kalla", "status", "filmrecension", "skapad"],
         "filters": {"kalla": "eq.ai"},
     },
 }
@@ -154,21 +154,26 @@ def assign_splits(data: dict, test_from: date, test_until: date | None = None) -
     return data
 
 
-def fingerprint(table: str, rows: list, mutable_columns: dict) -> str:
-    """Order-independent hash of the immutable content of rows."""
+def fingerprint(table: str, rows: list, mutable_columns: dict, columns=None) -> str:
+    """Order-independent hash of the immutable content of rows, limited to columns when given."""
     skip = set(mutable_columns.get(table, ())) | {"split"}
+    keep = (lambda k: k in columns and k not in skip) if columns is not None else (lambda k: k not in skip)
     lines = sorted(
-        (row["id"], json.dumps({k: v for k, v in row.items() if k not in skip}, ensure_ascii=False, sort_keys=True))
+        (row["id"], json.dumps({k: v for k, v in row.items() if keep(k)}, ensure_ascii=False, sort_keys=True))
         for row in rows
     )
     return hashlib.sha256("".join(f"{row_id}\t{body}\n" for row_id, body in lines).encode("utf-8")).hexdigest()
 
 
-def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_columns: dict = MUTABLE_COLUMNS) -> dict:
+def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_columns: dict = MUTABLE_COLUMNS,
+                    columns: dict | None = None) -> dict:
+    """Ids and fingerprints of the test rows; columns (default: the export's) records what the hash covers."""
     tables = {}
     for table, rows in data.items():
         test = [row for row in rows if row["split"] == "test"]
-        tables[table] = {"ids": sorted(row["id"] for row in test), "sha256": fingerprint(table, test, mutable_columns)}
+        cols = (columns or {}).get(table, COLUMNS.get(table))
+        tables[table] = {"ids": sorted(row["id"] for row in test), "columns": cols,
+                         "sha256": fingerprint(table, test, mutable_columns, cols)}
     return {
         "schema_version": 1,
         "test_from": test_from.isoformat(),
@@ -180,9 +185,11 @@ def frozen_test_set(data: dict, test_from: date, test_until: date, mutable_colum
 
 def verify_frozen(data: dict, frozen: dict) -> None:
     """Refuse to export if the frozen test rows were added, removed or edited."""
-    # Hash with the exclusions recorded at freeze time, so later edits to MUTABLE_COLUMNS cannot break v1.
+    # Hash with the exclusions and columns recorded at freeze time, so later edits to MUTABLE_COLUMNS or a newly
+    # exported column cannot break v1, while edits to the frozen columns are still caught.
     current = frozen_test_set(data, date.fromisoformat(frozen["test_from"]), date.fromisoformat(frozen["test_until"]),
-                              frozen["mutable_columns"])
+                              frozen["mutable_columns"],
+                              {table: spec.get("columns") for table, spec in frozen["tables"].items()})
     for table, expected in frozen["tables"].items():
         if table not in current["tables"]:
             hint = " (set SUPABASE_SERVICE_ROLE_KEY)" if table in PRIVATE_TABLES else ""
@@ -232,6 +239,13 @@ def write_export(data: dict, output: Path, test_from: date, source: str, test_un
     }
     files["markets"]["resolved_by_month"] = monthly(
         month_of(row["skapad"]) for row in data["markets"] if row["status"] == "avgjord")
+    for table in ("artiklar", "inlamningar"):
+        if table in files:
+            # Film reviews are a different genre; counted so they can be kept apart from debate writing.
+            files[table]["filmrecension_by_split"] = {
+                split: sum(row["split"] == split and row.get("filmrecension") is True for row in data[table])
+                for split in ("train", "test")
+            }
     if "inlamningar" in files:
         # Accept/reject balance per split, needed to judge whether the editor test can measure rejections.
         files["inlamningar"]["beslut_by_split"] = {
