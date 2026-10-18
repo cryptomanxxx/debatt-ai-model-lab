@@ -20,7 +20,8 @@ upload() {
   fi
   cat upload.log
 }
-if kaggle datasets status "$dataset" > status.log 2>&1 && grep -Eiq '^(ready|pending)' status.log; then
+# Any recognized status, including a failed earlier upload ("error"), means the dataset exists: add a version.
+if kaggle datasets status "$dataset" > status.log 2>&1 && grep -Eiq '^(ready|pending|error)' status.log; then
   upload kaggle datasets version -p "$dir" -m "Export for run ${EXPERIMENT_RUN_ID}" || { echo "::error::Dataset version upload failed"; exit 1; }
 else
   upload kaggle datasets create -p "$dir" || { echo "::error::Dataset creation failed"; exit 1; }

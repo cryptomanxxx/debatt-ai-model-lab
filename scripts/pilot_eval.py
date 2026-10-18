@@ -172,10 +172,16 @@ def brier(probabilities: list, outcomes: list):
     return sum((p - o) ** 2 for p, o in zip(probabilities, outcomes)) / len(outcomes) if outcomes else None
 
 
-def market_metrics(items: list, predictions: list) -> dict:
-    """Score every market: an unparsable reply counts as an uninformed 50% forecast."""
+def market_metrics(items: list, predictions: list, consensus_ids: set) -> dict:
+    """Score every market: an unparsable reply counts as an uninformed 50% forecast.
+
+    The second Brier score uses only the markets the agent consensus covers, so the two are comparable."""
+    probabilities = [0.5 if p is None else p for p in predictions]
+    outcomes = [m["utfall"] == "ja" for m in items]
+    subset = [(p, o) for m, p, o in zip(items, probabilities, outcomes) if m["id"] in consensus_ids]
     return {"n": len(items), "parsed": sum(p is not None for p in predictions),
-            "brier": brier([0.5 if p is None else p for p in predictions], [m["utfall"] == "ja" for m in items])}
+            "brier": brier(probabilities, outcomes),
+            "brier_consensus_markets": brier([p for p, _ in subset], [o for _, o in subset])}
 
 
 def baselines(markets: list, bets: list, items: list) -> dict:
@@ -195,8 +201,10 @@ def baselines(markets: list, bets: list, items: list) -> dict:
     return {
         "train_base_rate": base_rate,
         "base_rate_brier": brier([base_rate] * len(items), outcomes),
+        "base_rate_brier_consensus_markets": brier([base_rate] * len(covered), [o for _, o in covered]),
         "agent_consensus_brier": brier([p for p, _ in covered], [o for _, o in covered]),
         "agent_consensus_markets": len(covered),
+        "agent_consensus_market_ids": sorted(m["id"] for m in items if by_market.get(m["id"])),
     }
 
 
@@ -207,7 +215,8 @@ def resolve_revision(model_id: str, revision):
     return HfApi().model_info(model_id).sha
 
 
-def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: dict, torch) -> dict:
+def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: dict, consensus_ids: set,
+              torch) -> dict:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     revision = resolve_revision(spec["id"], spec.get("revision"))
@@ -236,7 +245,7 @@ def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: d
     return {
         "id": spec["id"], "revision": revision,
         "editor": editor_metrics(editor, editor_pred, fallback),
-        "markets": market_metrics(markets, market_pred),
+        "markets": market_metrics(markets, market_pred, consensus_ids),
         "predictions": {
             "editor": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(editor, editor_raw, editor_pred)],
             "markets": [{"id": m["id"], "raw": raw, "probability": p} for m, raw, p in zip(markets, market_raw, market_pred)],
@@ -265,14 +274,15 @@ def main() -> None:
     editor = editor_items(articles, config["editor_sample"], config["seed"])
     markets = market_items(markets_all)
     fallback = train_mean_scores(articles)
+    market_baselines = baselines(markets_all, bets, markets)
+    consensus_ids = set(market_baselines["agent_consensus_market_ids"])
 
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
         "config": config, "editor_items": len(editor), "market_items": len(markets),
-        "baselines": baselines(markets_all, bets, markets)
-        | {"editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback)},
-        "models": [run_model(spec, config, editor, markets, fallback, torch) for spec in config["models"]],
+        "baselines": market_baselines | {"editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback)},
+        "models": [run_model(spec, config, editor, markets, fallback, consensus_ids, torch) for spec in config["models"]],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

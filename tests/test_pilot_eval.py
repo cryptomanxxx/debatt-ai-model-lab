@@ -70,7 +70,8 @@ def test_metrics():
     # The unparsable reply stays in the denominator with the fallback score: (1 + |4-5| + 0) / 3.
     assert metrics["parsed"] == 2 and metrics["n"] == 3 and metrics["arg"]["mae"] == pytest.approx(2 / 3)
     markets = [{"id": 1, "utfall": "ja"}, {"id": 2, "utfall": "nej"}]
-    assert market_metrics(markets, [1.0, None]) == {"n": 2, "parsed": 1, "brier": 0.125}
+    assert market_metrics(markets, [1.0, None], {2}) == {"n": 2, "parsed": 1, "brier": 0.125,
+                                                          "brier_consensus_markets": 0.25}
 
 
 def test_train_mean_fallback():
@@ -90,6 +91,7 @@ def test_baselines_use_train_rate_and_test_bets():
     result = baselines(markets, bets, market_items(markets))
     assert result["train_base_rate"] == 0.5 and result["base_rate_brier"] == 0.25
     assert result["agent_consensus_brier"] == pytest.approx(0.09) and result["agent_consensus_markets"] == 1
+    assert result["agent_consensus_market_ids"] == [3] and result["base_rate_brier_consensus_markets"] == 0.25
 
 
 def test_dataset_discovery_and_provenance(tmp_path):
