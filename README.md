@@ -50,7 +50,7 @@ Optionally set the Actions variable `SUPABASE_URL`.
 
 ## Pilot evaluation
 
-The manual **Kaggle GPU Pilot Evaluation** workflow:
+The manual **AI Model Evaluation (Kaggle GPU)** workflow:
 1. exports and verifies the frozen test set;
 2. uploads it as the private Kaggle dataset `debatt-ai-eval-data`, tagged with the workflow run;
 3. runs `scripts/pilot_eval.py` on a Kaggle T4 for every model in `configs/pilot.json`.
