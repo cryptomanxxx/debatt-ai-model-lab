@@ -1,5 +1,6 @@
 """CPU-only tests for the pilot evaluation logic; model inference runs on Kaggle."""
 import json
+import re
 
 import pytest
 
@@ -70,8 +71,9 @@ def test_metrics():
     # The unparsable reply stays in the denominator with the fallback score: (1 + |4-5| + 0) / 3.
     assert metrics["parsed"] == 2 and metrics["n"] == 3 and metrics["arg"]["mae"] == pytest.approx(2 / 3)
     markets = [{"id": 1, "utfall": "ja"}, {"id": 2, "utfall": "nej"}]
-    assert market_metrics(markets, [1.0, None], {2}) == {"n": 2, "parsed": 1, "brier": 0.125,
-                                                          "brier_consensus_markets": 0.25}
+    result = market_metrics(markets, [1.0, None], {2})
+    assert (result["parsed"], result["brier"], result["brier_consensus_markets"]) == (1, 0.125, 0.25)
+    assert result["distinct_predictions"] == 2
 
 
 def test_train_mean_fallback():
@@ -105,3 +107,21 @@ def test_dataset_discovery_and_provenance(tmp_path):
         check_provenance(data, "2-1", FROZEN)
     with pytest.raises(RuntimeError, match="not the frozen test set"):
         check_provenance(data, "1-1", {"test_from": "2026-01-01", "test_until": "2026-10-16"})
+
+
+def test_constant_answers_are_exposed():
+    items = [article(i, arg=v) for i, v in enumerate([6, 7, 8, 9])]
+    copied = {"arg": 8, "ori": 7, "rel": 9, "tro": 8}
+    metrics = editor_metrics(items, [copied] * 4, copied)
+    assert metrics["distinct_predictions"] == 1
+    assert metrics["arg"]["prediction_std"] == 0 and metrics["arg"]["truth_std"] > 0
+    assert metrics["arg"]["spearman"] is None
+    markets = [{"id": i, "utfall": "ja"} for i in range(3)]
+    assert market_metrics(markets, [0.55] * 3, set())["prediction_std"] == 0
+
+
+def test_prompts_contain_no_copyable_example_values():
+    prompt = editor_prompt(article(1), 100)
+    assert '"arg": A' in prompt and not re.search(r'"(arg|ori|rel|tro)":\s*\d', prompt)
+    market = {"skapad": "2026-09-14T10:00:00+00:00", "titel": "T", "beskrivning": "B", "deadline": "2026-12-31"}
+    assert not re.search(r'"sannolikhet":\s*\d', market_prompt(market))

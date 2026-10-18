@@ -21,7 +21,8 @@ EDITOR_PROMPT = """Du är chefredaktör för en svensk debattajt. Bedöm artikel
 4. Trovärdighet – Är faktapåståendena rimliga och välgrundade?
 
 Svara ENDAST med JSON (inga andra tecken):
-{{"arg":8,"ori":7,"rel":9,"tro":8}}
+{{"arg": A, "ori": O, "rel": R, "tro": T}}
+där A, O, R och T är dina egna heltal 0-10 för respektive kriterium.
 
 Rubrik: {rubrik}
 
@@ -34,8 +35,8 @@ Beskrivning: {beskrivning}
 Deadline: {deadline}
 
 Svara ENDAST med JSON (inga andra tecken):
-{{"sannolikhet":55}}
-där sannolikhet är ett heltal 0-100 (procent)."""
+{{"sannolikhet": P}}
+där P är din egen bedömning i procent, ett heltal 0-100."""
 
 
 def load_config(path: str) -> dict:
@@ -155,15 +156,28 @@ def train_mean_scores(articles: list) -> dict:
     return {k: sum(a[k] for a in train) / len(train) if train else 5 for k in SCORES}
 
 
+def std(values: list):
+    if not values:
+        return None
+    mean = sum(values) / len(values)
+    return (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+
+
 def editor_metrics(items: list, predictions: list, fallback: dict) -> dict:
-    """Score every item: an unparsable reply gets the training-mean scores, so failures cannot improve a model."""
+    """Score every item: an unparsable reply gets the training-mean scores, so failures cannot improve a model.
+
+    Spread and distinct-answer counts expose a model that repeats one answer: its MAE can look fine
+    while it has learned nothing about individual articles."""
     guesses = [pred if pred is not None else fallback for pred in predictions]
-    metrics = {"n": len(items), "parsed": sum(pred is not None for pred in predictions)}
+    metrics = {"n": len(items), "parsed": sum(pred is not None for pred in predictions),
+               "distinct_predictions": len({tuple(g[k] for k in SCORES) for g in guesses})}
     for k in SCORES:
         truth, guess = [item[k] for item in items], [g[k] for g in guesses]
         metrics[k] = {
             "mae": sum(abs(a - b) for a, b in zip(truth, guess)) / len(items) if items else None,
             "spearman": spearman(truth, guess),
+            "truth_std": std(truth),
+            "prediction_std": std(guess),
         }
     return metrics
 
@@ -180,6 +194,7 @@ def market_metrics(items: list, predictions: list, consensus_ids: set) -> dict:
     outcomes = [m["utfall"] == "ja" for m in items]
     subset = [(p, o) for m, p, o in zip(items, probabilities, outcomes) if m["id"] in consensus_ids]
     return {"n": len(items), "parsed": sum(p is not None for p in predictions),
+            "distinct_predictions": len(set(probabilities)), "prediction_std": std(probabilities),
             "brier": brier(probabilities, outcomes),
             "brier_consensus_markets": brier([p for p, _ in subset], [o for _, o in subset])}
 

@@ -50,22 +50,27 @@ jobs:
           python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
           r = json.load(open("kaggle-results/pilot_results.json", encoding="utf-8"))
-          b = r["baselines"]
+          b, k = r["baselines"], ("arg", "ori", "rel", "tro")
+          f = lambda v: "-" if v is None else f"{v:.2f}"
           print("## Pilot evaluation\n")
           print(f"{r['editor_items']} editor articles, {r['market_items']} resolved markets, GPU {r['gpu_name']}\n")
-          print("| Model | Revision | Editor parsed | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Markets parsed | Brier (all) | Brier (consensus markets) |")
-          print("| --- | --- | --- | --- | --- | --- | --- | --- |")
-          f = lambda v: "-" if v is None else f"{v:.2f}"
+          print("| Model | Editor parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Answer spread (std) arg/ori/rel/tro | Markets parsed | Distinct | Brier (all) | Brier (consensus markets) |")
+          print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
           for m in r["models"]:
-              e, k = m["editor"], ("arg", "ori", "rel", "tro")
-              print(f"| {m['id']} | `{m['revision'][:7]}` | {e['parsed']}/{e['n']} | {' / '.join(f(e[x]['mae']) for x in k)} "
-                    f"| {' / '.join(f(e[x]['spearman']) for x in k)} | {m['markets']['parsed']}/{m['markets']['n']} | {f(m['markets']['brier'])} | {f(m['markets']['brier_consensus_markets'])} |")
+              e, mk = m["editor"], m["markets"]
+              print(f"| {m['id']} | {e['parsed']}/{e['n']} | {e['distinct_predictions']} | {' / '.join(f(e[x]['mae']) for x in k)} "
+                    f"| {' / '.join(f(e[x]['spearman']) for x in k)} | {' / '.join(f(e[x]['prediction_std']) for x in k)} "
+                    f"| {mk['parsed']}/{mk['n']} | {mk['distinct_predictions']} | {f(mk['brier'])} | {f(mk['brier_consensus_markets'])} |")
           t = b["editor_train_mean"]
-          print(f"\nBaselines: editor training mean → MAE {' / '.join(f(t[x]['mae']) for x in ('arg', 'ori', 'rel', 'tro'))}; "
+          print(f"\nEditor truth spread (std) arg/ori/rel/tro: {' / '.join(f(t[x]['truth_std']) for x in k)}")
+          print(f"\nBaselines: editor training mean → MAE {' / '.join(f(t[x]['mae']) for x in k)}; "
                 f"market base rate {b['train_base_rate']:.2f} → Brier {f(b['base_rate_brier'])} (all), "
                 f"{f(b['base_rate_brier_consensus_markets'])} (consensus markets); "
                 f"agent consensus (bets by creation day) Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
           print("\nUnparsable replies are scored, not dropped: training-mean scores for the editor, 50% for markets.")
+          print("A model with 1 distinct answer is repeating itself; its MAE says nothing about individual items.\n")
+          for m in r["models"]:
+              print(f"Revision {m['id']}: `{m['revision']}`  ")
           PY
       - name: Upload results
         if: always()
