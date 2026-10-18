@@ -45,7 +45,9 @@ jobs:
       - name: Summarize results
         if: success()
         run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          # tee: the table also lands in the job log, which can be read without opening the run page.
+          set -o pipefail
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
           r = json.load(open("kaggle-results/pilot_results.json", encoding="utf-8"))
           b = r["baselines"]
