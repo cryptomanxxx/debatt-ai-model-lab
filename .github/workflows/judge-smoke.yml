@@ -9,6 +9,8 @@ permissions:
 jobs:
   judges:
     runs-on: ubuntu-latest
+    # Secrets live in the "secure" environment, which only main may use; another branch cannot read them.
+    environment: secure
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

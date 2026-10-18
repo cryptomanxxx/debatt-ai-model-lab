@@ -13,6 +13,8 @@ concurrency:
 jobs:
   kaggle-gpu:
     runs-on: ubuntu-latest
+    # Secrets live in the "secure" environment, which only main may use; another branch cannot read them.
+    environment: secure
     timeout-minutes: 180
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}

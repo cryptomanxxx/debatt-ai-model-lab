@@ -22,6 +22,8 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest
+    # Secrets live in the "secure" environment, which only main may use; another branch cannot read them.
+    environment: secure
     timeout-minutes: 20
     env:
       # Public anon key only: the export sees exactly what RLS exposes on debatt-ai.se.
