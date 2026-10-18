@@ -44,6 +44,25 @@ Once `evals/frozen/v1.json` exists, a run with empty dates reuses its test windo
 
 Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys, so it can only read what Row Level Security exposes publicly. Optionally set the Actions variable `SUPABASE_URL`.
 
+## Pilot evaluation
+
+The manual **Kaggle GPU Pilot Evaluation** workflow:
+1. exports and verifies the frozen test set;
+2. uploads it as the private Kaggle dataset `debatt-ai-eval-data`, tagged with the workflow run;
+3. runs `scripts/pilot_eval.py` on a Kaggle T4 for every model in `configs/pilot.json`.
+
+Two tasks are scored:
+- **Editor:** a seeded sample of test articles is scored on `arg`/`ori`/`rel`/`tro`. The prompt uses the Debatt-AI editor's criteria, and predictions are compared with the stored editor scores (MAE and Spearman).
+- **Markets:** every resolved test market gets a probability, dated at market creation, and is scored with Brier. The training base rate and the agents' consensus are scored as baselines.
+
+The job summary shows the table; the artifact holds every raw reply. A model with `"revision": null` is resolved to its current Hugging Face commit at run time, and that commit is recorded in the results; pin it in the config afterwards.
+
+Needs the Kaggle secrets above and `SUPABASE_ANON_KEY`.
+
+## Judge API smoke test
+
+**Judge API Smoke Test** checks `HIP_API_KEY` and `BLABLADOR_API_KEY` (Actions secrets). For the judges in `configs/judges.json`, it lists each provider's models and sends one synthetic prompt per judge. Errors are reported as short codes only, so keys cannot leak into logs.
+
 ## Roadmap
 
 See [docs/evaluation-plan.md](docs/evaluation-plan.md) for the goal of Debatt-AI model 1.0, the base model choice, metrics and release criteria.
