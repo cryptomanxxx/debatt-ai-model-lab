@@ -63,31 +63,35 @@ jobs:
           r = json.load(open("kaggle-results/train_results.json", encoding="utf-8"))
           k = ("arg", "ori", "rel", "tro")
           f = lambda v: "-" if v is None else f"{v:.2f}"
-          c, t = r["counts"], r["training"]
+          c, t, cfg = r["counts"], r["training"], r["config"]
           print("## Editor training (QLoRA)\n")
           print(f"{c['train_examples']} training examples from {c['train_rows']} submissions "
-                f"({c['train_held_rows']} not published, each repeated {r['config']['held_weight']}x); "
-                f"{c['train_examples_too_long']} too long; {t['steps']} steps; "
+                f"({c['train_held_rows']} not published, each repeated {c['held_weight']}x for a {cfg['held_share']:.0%} share); "
+                f"{c['train_examples_too_long']} too long; {t['steps']} steps; reasoning {'on' if cfg['reasoning'] else 'off'}; "
                 f"loss {t['loss_first_50']:.3f} (first 50) → {t['loss_last_50']:.3f} (last 50). GPU {r['gpu_name']}\n")
-          tasks = [("validation", "Validation (last days before the test window)"), ("editor", "Editor articles (test)"),
-                   ("film_reviews", "Film reviews (test)"), ("submissions", "Submissions (test)")]
-          for key, title in tasks:
-              print(f"### {title}\n")
+          print("Release bar: beat the training-mean answer on MAE (interval below zero), rank texts like the editor "
+                "(Spearman above zero) and hold back texts (balanced accuracy above 0.50).\n")
+          titles = {"validation": "Validation (last days before the test window)", "editor": "Editor articles (test)",
+                    "film_reviews": "Film reviews (test)", "submissions": "Submissions (test)"}
+          for key in cfg["tuned_eval_tasks"]:
+              print(f"### {titles[key]}\n")
               print("| Model | Parsed | Distinct | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Balanced accuracy |")
               print("| --- | --- | --- | --- | --- | --- |")
-              for name in ("base", "tuned"):
-                  if name not in r:
+              for name, label in (("train_mean", "training mean"), ("base", "base"), ("tuned", "tuned")):
+                  m = r.get(name, {}).get(key)
+                  if not m:
                       continue
-                  m = r[name][key]
                   bal = m["decision"]["balanced_accuracy"] if "decision" in m else None
-                  print(f"| {name} | {m['parsed']}/{m['n']} | {m['distinct_predictions'] if m['distinct_predictions'] is not None else '-'} "
+                  print(f"| {label} | {m['parsed']}/{m['n']} | {m['distinct_predictions'] if m['distinct_predictions'] is not None else '-'} "
                         f"| {' / '.join(f(m[x]['mae']) for x in k)} | {' / '.join(f(m[x]['spearman']) for x in k)} | {f(bal)} |")
-              diff = r.get("tuned_minus_base", {}).get(key)
-              if diff:
-                  print("\nMAE tuned − base (95% bootstrap interval; below zero = better): " + "; ".join(
-                      f"{x} {diff[x]['mae_diff']:+.2f} [{diff[x]['ci95'][0]:+.2f}, {diff[x]['ci95'][1]:+.2f}]" for x in k))
+              for diff_key, against in (("tuned_minus_train_mean", "training mean"), ("tuned_minus_base", "base")):
+                  diff = r.get(diff_key, {}).get(key)
+                  if diff:
+                      print(f"\nMAE tuned − {against} (95% bootstrap interval; below zero = better): " + "; ".join(
+                          f"{x} {diff[x]['mae_diff']:+.2f} [{diff[x]['ci95'][0]:+.2f}, {diff[x]['ci95'][1]:+.2f}]" for x in k))
               print()
-          print(f"Revision {r['config']['model']['id']}: `{r['config']['model']['revision']}`")
+          print("Minutes per phase: " + "; ".join(f"{n} {s / 60:.0f}" for n, s in r.get("phase_seconds", {}).items()) + "\n")
+          print(f"Revision {cfg['model']['id']}: `{cfg['model']['revision']}`")
           PY
       - name: Upload results
         if: always()

@@ -205,3 +205,21 @@ def test_progress_prints_at_most_once_per_interval_but_always_at_the_end():
         now[0] += seconds
     progress.run([1] * 5, step)
     assert len(lines) == 2 and "5/5" in lines[-1]
+
+
+def test_progress_records_seconds_per_phase():
+    from scripts.pilot_eval import Progress
+    now = [0.0]
+    progress = Progress([("a", 1, "x"), ("b", 1, "y")], "7-1", clock=lambda: now[0], out=lambda line, flush: None)
+    progress.next_phase()
+    now[0] += 30
+    progress.next_phase()
+    now[0] += 12
+    assert progress.durations() == {"a": 30, "b": 12}
+
+
+def test_reasoned_prompt_asks_for_a_justification_first():
+    from scripts.pilot_eval import editor_prompt
+    plain, reasoned = editor_prompt(article(1), 100), editor_prompt(article(1), 100, reasoned=True)
+    assert '"motivering": M' in reasoned and "motivering" not in plain
+    assert reasoned.endswith(plain[plain.index("Rubrik:"):])
