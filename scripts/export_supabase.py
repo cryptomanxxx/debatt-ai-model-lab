@@ -286,10 +286,14 @@ def main() -> None:
         raise ValueError("SUPABASE_URL must be https://<project>.supabase.co")
     key = os.environ["SUPABASE_ANON_KEY"]
     require_public_key(key)
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    # Fail before any download when the frozen set needs a table only the service role key can read.
+    needed = sorted(set(PRIVATE_TABLES) & set(frozen["tables"])) if frozen else []
+    if needed and not service_key:
+        raise SystemExit(f"{', '.join(needed)} is part of {args.frozen}; set SUPABASE_SERVICE_ROLE_KEY")
     test_from = args.test_from
     data = {table: fetch_table(base_url, key, table, columns) for table, columns in TABLES.items()}
-    # Optional: without it the export holds public tables only.
-    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    # Without it (and without a frozen set that needs it) the export holds public tables only.
     if service_key:
         require_service_key(service_key)
         for table in PRIVATE_TABLES:

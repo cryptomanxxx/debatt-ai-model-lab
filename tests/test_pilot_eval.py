@@ -135,3 +135,31 @@ def test_fallback_is_not_counted_as_an_answer():
     assert metrics["distinct_predictions"] == 1 and metrics["arg"]["prediction_std"] == 0
     nothing = editor_metrics(items, [None] * 3, fallback)
     assert nothing["distinct_predictions"] is None and nothing["arg"]["prediction_std"] is None
+
+
+def submission(i, beslut, split="test", **scores):
+    return article(i, split=split, **scores) | {"beslut": beslut}
+
+
+def test_submission_sample_keeps_every_held_submission():
+    from scripts.pilot_eval import submission_items
+    subs = ([submission(i, "publicera") for i in range(40)] + [submission(100, "avvisa"), submission(101, "revidera"),
+            submission(102, "avvisa", split="train"), submission(103, "publicera", arg=None), submission(104, None)])
+    items = submission_items(subs, 10, 7)
+    assert [s["id"] for s in items] == [s["id"] for s in submission_items(list(reversed(subs)), 10, 7)]
+    assert len(items) == 10 and {100, 101} <= {s["id"] for s in items}
+    assert all(s["split"] == "test" and s["id"] not in (102, 103, 104) for s in items)
+    assert [s["id"] for s in submission_items(subs, 1, 7)] in ([100], [101])
+
+
+def test_decision_metrics_follow_the_publish_threshold():
+    from scripts.pilot_eval import decision_metrics
+    items = [submission(1, "publicera"), submission(2, "publicera"), submission(3, "avvisa"), submission(4, "revidera")]
+    high, low = dict.fromkeys(("arg", "ori", "rel", "tro"), 6), dict.fromkeys(("arg", "ori", "rel", "tro"), 6) | {"tro": 5}
+    metrics = decision_metrics(items, [high, low, low, None], fallback=high)
+    assert (metrics["published"], metrics["not_published"]) == (2, 2)
+    assert metrics["recall_published"] == 0.5 and metrics["recall_not_published"] == 0.5
+    assert metrics["balanced_accuracy"] == 0.5
+    # Always publishing, as the training mean does, scores 0.5 whatever the class mix.
+    assert decision_metrics(items, [None] * 4, fallback=high)["balanced_accuracy"] == 0.5
+    assert decision_metrics(items[:2], [high, high], fallback=high)["balanced_accuracy"] is None

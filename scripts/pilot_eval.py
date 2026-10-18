@@ -1,4 +1,4 @@
-"""Pilot evaluation on the frozen test set: AI editor scores and prediction markets, GPU-only inference."""
+"""Pilot evaluation on the frozen test set: AI editor scores, publish decisions and prediction markets, GPU-only."""
 import argparse
 import json
 import random
@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from smollm3_smoketest import fixed_strftime, require_cuda  # noqa: E402
 
 SCORES = ("arg", "ori", "rel", "tro")
+DECISIONS = ("publicera", "revidera", "avvisa")
+# Debatt-AI publishes only when all four scores are at least 6 (debatt-ai app/api/agent/submit/route.js).
+PUBLISH_THRESHOLD = 6
 
 # The criteria are copied from the Debatt-AI editor (debatt-ai app/client.js); the answer is reduced to the
 # four scores so a small model spends its tokens on the judgment, not on the rest of the editor JSON.
@@ -47,8 +50,9 @@ def load_config(path: str) -> dict:
         revision = model.get("revision")
         if revision is not None and not re.fullmatch(r"[0-9a-f]{40}", revision):
             raise ValueError(f"{model['id']}: revision must be a 40-character commit SHA or null")
-    if not isinstance(config.get("editor_sample"), int) or config["editor_sample"] <= 0:
-        raise ValueError("editor_sample must be a positive integer")
+    for key in ("editor_sample", "submission_sample"):
+        if not isinstance(config.get(key), int) or config[key] <= 0:
+            raise ValueError(f"{key} must be a positive integer")
     return config
 
 
@@ -82,6 +86,21 @@ def editor_items(articles: list, sample: int, seed: int) -> list:
     scored = [a for a in articles if a["split"] == "test" and all(isinstance(a.get(k), int) for k in SCORES)]
     scored.sort(key=lambda a: a["id"])
     return random.Random(seed).sample(scored, min(sample, len(scored)))
+
+
+def submission_items(submissions: list, sample: int, seed: int) -> list:
+    """Every test submission the editor did not publish, topped up with a seeded sample of published ones.
+
+    Published submissions outnumber the rest about six to one, so a plain sample would hold few rejections.
+    The metrics that use the decision are per class, so the mix does not bias them."""
+    scored = sorted((s for s in submissions if s["split"] == "test" and s.get("beslut") in DECISIONS
+                     and all(isinstance(s.get(k), int) for k in SCORES)), key=lambda s: s["id"])
+    held = [s for s in scored if s["beslut"] != "publicera"]
+    published = [s for s in scored if s["beslut"] == "publicera"]
+    rng = random.Random(seed)
+    if len(held) >= sample:
+        return sorted(rng.sample(held, sample), key=lambda s: s["id"])
+    return sorted(held + rng.sample(published, min(sample - len(held), len(published))), key=lambda s: s["id"])
 
 
 def market_items(markets: list) -> list:
@@ -184,6 +203,31 @@ def editor_metrics(items: list, predictions: list, fallback: dict) -> dict:
     return metrics
 
 
+def would_publish(scores: dict) -> bool:
+    return all(scores[k] >= PUBLISH_THRESHOLD for k in SCORES)
+
+
+def decision_metrics(items: list, predictions: list, fallback: dict) -> dict:
+    """Publish/hold decision implied by the scores, compared with the editor's beslut, per class.
+
+    Balanced accuracy does not depend on the sample's class mix; always publishing scores 0.5."""
+    guesses = [pred if pred is not None else fallback for pred in predictions]
+    truth = [item["beslut"] == "publicera" for item in items]
+    predicted = [would_publish(g) for g in guesses]
+
+    def recall(label):
+        hits = [p == label for t, p in zip(truth, predicted) if t == label]
+        return sum(hits) / len(hits) if hits else None
+    published, held = recall(True), recall(False)
+    return {"published": sum(truth), "not_published": len(truth) - sum(truth),
+            "recall_published": published, "recall_not_published": held,
+            "balanced_accuracy": (published + held) / 2 if published is not None and held is not None else None}
+
+
+def submission_metrics(items: list, predictions: list, fallback: dict) -> dict:
+    return editor_metrics(items, predictions, fallback) | {"decision": decision_metrics(items, predictions, fallback)}
+
+
 def brier(probabilities: list, outcomes: list):
     return sum((p - o) ** 2 for p, o in zip(probabilities, outcomes)) / len(outcomes) if outcomes else None
 
@@ -233,8 +277,8 @@ def resolve_revision(model_id: str, revision):
     return HfApi().model_info(model_id).sha
 
 
-def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: dict, consensus_ids: set,
-              torch) -> dict:
+def run_model(spec: dict, config: dict, editor: list, submissions: list, markets: list, fallback: dict,
+              submission_fallback: dict, consensus_ids: set, torch) -> dict:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     revision = resolve_revision(spec["id"], spec.get("revision"))
@@ -255,17 +299,23 @@ def run_model(spec: dict, config: dict, editor: list, markets: list, fallback: d
 
     # Each prompt is dated at its item's creation, so the "today" a template inserts matches what the item knew.
     editor_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in editor]
+    submission_raw = [generate(editor_prompt(s, config["max_article_chars"]), utc_day(s["skapad"]), 64)
+                      for s in submissions]
     market_raw = [generate(market_prompt(m), utc_day(m["skapad"]), 32) for m in markets]
     editor_pred = [parse_scores(text) for text in editor_raw]
+    submission_pred = [parse_scores(text) for text in submission_raw]
     market_pred = [parse_probability(text) for text in market_raw]
     del model
     torch.cuda.empty_cache()
     return {
         "id": spec["id"], "revision": revision,
         "editor": editor_metrics(editor, editor_pred, fallback),
+        "submissions": submission_metrics(submissions, submission_pred, submission_fallback),
         "markets": market_metrics(markets, market_pred, consensus_ids),
         "predictions": {
             "editor": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(editor, editor_raw, editor_pred)],
+            "submissions": [{"id": s["id"], "raw": raw, "scores": p}
+                            for s, raw, p in zip(submissions, submission_raw, submission_pred)],
             "markets": [{"id": m["id"], "raw": raw, "probability": p} for m, raw, p in zip(markets, market_raw, market_pred)],
         },
     }
@@ -289,22 +339,32 @@ def main() -> None:
     articles = read_jsonl(data_dir / "artiklar.jsonl")
     markets_all = read_jsonl(data_dir / "markets.jsonl")
     bets = read_jsonl(data_dir / "agent_bets.jsonl")
+    submissions_all = read_jsonl(data_dir / "inlamningar.jsonl")
     editor = editor_items(articles, config["editor_sample"], config["seed"])
+    submissions = submission_items(submissions_all, config["submission_sample"], config["seed"])
     markets = market_items(markets_all)
     fallback = train_mean_scores(articles)
+    submission_fallback = train_mean_scores(submissions_all)
     market_baselines = baselines(markets_all, bets, markets)
     consensus_ids = set(market_baselines["agent_consensus_market_ids"])
 
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
-        "config": config, "editor_items": len(editor), "market_items": len(markets),
-        "baselines": market_baselines | {"editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback)},
-        "models": [run_model(spec, config, editor, markets, fallback, consensus_ids, torch) for spec in config["models"]],
+        "config": config, "editor_items": len(editor), "submission_items": len(submissions),
+        "market_items": len(markets),
+        "baselines": market_baselines | {
+            "editor_train_mean": editor_metrics(editor, [None] * len(editor), fallback),
+            "submissions_train_mean": submission_metrics(submissions, [None] * len(submissions), submission_fallback),
+        },
+        "models": [run_model(spec, config, editor, submissions, markets, fallback, submission_fallback, consensus_ids,
+                             torch) for spec in config["models"]],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    summary = {m["id"]: {"editor": {k: m["editor"][k] for k in ("parsed", *SCORES)}, "markets": m["markets"]}
+    summary = {m["id"]: {"editor": {k: m["editor"][k] for k in ("parsed", *SCORES)},
+                         "submissions": {k: m["submissions"][k] for k in ("parsed", *SCORES, "decision")},
+                         "markets": m["markets"]}
                for m in results["models"]}
     print(json.dumps({"baselines": results["baselines"], "models": summary}, indent=2, ensure_ascii=False))
 

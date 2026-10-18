@@ -4,6 +4,7 @@
     {"id": "HuggingFaceTB/SmolLM3-3B", "revision": "1c00fc78bd9cf90108046bc433cb34992480f1c1"}
   ],
   "editor_sample": 200,
+  "submission_sample": 300,
   "seed": 20261018,
   "max_article_chars": 6000
 }

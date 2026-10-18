@@ -28,15 +28,18 @@ jobs:
         with:
           python-version: "3.11"
       - name: Ensure credentials are set
+        env:
+          # Only checked for presence here; the export step is the only one that uses it.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          for name in KAGGLE_USERNAME KAGGLE_API_TOKEN SUPABASE_ANON_KEY; do
+          for name in KAGGLE_USERNAME KAGGLE_API_TOKEN SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
             test -n "${!name}" || { echo "::error::$name secret missing"; exit 1; }
           done
       - name: Install Kaggle CLI
         run: python -m pip install 'kaggle>=1.8,<2'
       - name: Export and verify the frozen test set
         env:
-          # Optional, read-only (GET): AI-agent submissions for the private Kaggle dataset only.
+          # Read-only (GET): AI-agent submissions, frozen in v1, for the private Kaggle dataset only.
           # Step scope, so no other step or tool (such as the Kaggle CLI) sees the key.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/export_supabase.py --output eval-data --frozen evals/frozen/v1.json
@@ -57,7 +60,7 @@ jobs:
           b, k = r["baselines"], ("arg", "ori", "rel", "tro")
           f = lambda v: "-" if v is None else f"{v:.2f}"
           print("## Pilot evaluation\n")
-          print(f"{r['editor_items']} editor articles, {r['market_items']} resolved markets, GPU {r['gpu_name']}\n")
+          print(f"{r['editor_items']} editor articles, {r['submission_items']} submissions, {r['market_items']} resolved markets, GPU {r['gpu_name']}\n")
           print("| Model | Editor parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Answer spread (std) arg/ori/rel/tro | Markets parsed | Distinct | Brier (all) | Brier (consensus markets) |")
           print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
           for m in r["models"]:
@@ -73,6 +76,18 @@ jobs:
                 f"agent consensus (bets by creation day) Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
           print("\nUnparsable replies are scored, not dropped: training-mean scores for the editor, 50% for markets.")
           print("Distinct answers and spread count parsed replies only. A model with 1 distinct answer is repeating itself; its MAE says nothing about individual items.\n")
+          print("\n### Submissions (accepted and rejected AI-agent texts)\n")
+          print("Publish if all four scores are at least 6, as on Debatt-AI. Balanced accuracy is the mean of both recalls; always publishing scores 0.50.\n")
+          print("| Model | Parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Recall published | Recall not published | Balanced accuracy |")
+          print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+          for name, s in [(m["id"], m["submissions"]) for m in r["models"]] + [("training mean", b["submissions_train_mean"])]:
+              d = s["decision"]
+              print(f"| {name} | {s['parsed']}/{s['n']} | {s['distinct_predictions'] if s['distinct_predictions'] is not None else '-'} "
+                    f"| {' / '.join(f(s[x]['mae']) for x in k)} | {' / '.join(f(s[x]['spearman']) for x in k)} "
+                    f"| {f(d['recall_published'])} | {f(d['recall_not_published'])} | {f(d['balanced_accuracy'])} |")
+          d = b["submissions_train_mean"]["decision"]
+          print(f"\n{d['published']} published and {d['not_published']} not published; truth spread (std) arg/ori/rel/tro: "
+                f"{' / '.join(f(b['submissions_train_mean'][x]['truth_std']) for x in k)}\n")
           for m in r["models"]:
               print(f"Revision {m['id']}: `{m['revision']}`  ")
           PY

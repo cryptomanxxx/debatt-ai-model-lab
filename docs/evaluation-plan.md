@@ -65,7 +65,7 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 
 | Area | Test data | Metric | Judge |
 | --- | --- | --- | --- |
-| Editor | test-split articles and AI-agent submissions (accepted and rejected) with editor scores | mean absolute error and Spearman correlation per score dimension; accept/reject accuracy once rejected examples are available | none |
+| Editor | test-split articles and AI-agent submissions (accepted and rejected) with editor scores | mean absolute error and Spearman correlation per score dimension; for submissions also the publish decision implied by the scores (all four at least 6), as recall per class and balanced accuracy | none |
 | Article writing | prompts built from test-split news sources | pairwise win rate vs. baseline; count of invented sources/studies/statistics | free LLM judge + human spot checks |
 | Direct debate | sample of test-split debates | pairwise win rate, persona consistency | free LLM judge + human spot checks |
 | Prediction markets | test-split resolved markets | Brier score vs. agent consensus and vs. base rate; calibration curve | none |

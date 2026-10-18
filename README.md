@@ -44,7 +44,7 @@ Once `evals/frozen/v1.json` exists, a run with empty dates reuses its test windo
 
 Set the Actions secret `SUPABASE_ANON_KEY` to Debatt-AI's public anon key. The script refuses service-role and secret keys for the public tables, so they only show what Row Level Security exposes publicly.
 
-Optionally set `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API Keys, the site project) to also export the AI agents' submissions from `inlamningar`, including rejected ones. The key is used for that table only, with GET requests only: the script never writes to the database. Only rows with `kalla = 'ai'` are requested, and the export fails if any other row comes back, so human submissions never leave the database. The submission texts go to the private Kaggle dataset only, not to the Actions artifact, because this repository is public.
+Also set `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API Keys, the site project; prefer a dedicated `sb_secret_` key that can be revoked on its own). It exports the AI agents' submissions from `inlamningar`, including rejected ones. They are part of the frozen test set v1, so exports with empty dates and the pilot fail early without it; only an export with an explicit new window works without it. The key is used for that table only, with GET requests only: the script never writes to the database. Only rows with `kalla = 'ai'` are requested, and the export fails if any other row comes back, so human submissions never leave the database. The submission texts go to the private Kaggle dataset only, not to the Actions artifact, because this repository is public.
 
 Optionally set the Actions variable `SUPABASE_URL`.
 
@@ -55,15 +55,16 @@ The manual **Kaggle GPU Pilot Evaluation** workflow:
 2. uploads it as the private Kaggle dataset `debatt-ai-eval-data`, tagged with the workflow run;
 3. runs `scripts/pilot_eval.py` on a Kaggle T4 for every model in `configs/pilot.json`.
 
-Two tasks are scored:
+Three tasks are scored:
 - **Editor:** a seeded sample of test articles is scored on `arg`/`ori`/`rel`/`tro`. The prompt uses the Debatt-AI editor's criteria, and predictions are compared with the stored editor scores (MAE and Spearman). The training-mean scores are reported as a baseline.
+- **Submissions:** every test submission the editor did not publish (`revidera`, `avvisa`), topped up with a seeded sample of published ones, is scored the same way. The scores also imply a decision (publish if all four are at least 6, as on Debatt-AI), reported as recall per class and balanced accuracy against the editor's `beslut`. The training mean of the submissions is the baseline.
 - **Markets:** every resolved test market gets a probability, dated at market creation, and is scored with Brier. The training base rate and the agents' consensus are scored as baselines; the consensus counts only bets placed by the market's creation day.
 
 Every prompt is dated at its item's creation, including the date a chat template inserts. An unparsable reply is scored rather than dropped: the training mean for the editor, 50% for markets.
 
 The job summary shows the table; the artifact holds every raw reply. A model with `"revision": null` is resolved to its current Hugging Face commit at run time, and that commit is recorded in the results; pin it in the config afterwards.
 
-Needs the Kaggle secrets above and `SUPABASE_ANON_KEY`.
+Needs the Kaggle secrets above, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`; the workflow checks all of them before it starts.
 
 ## Judge API smoke test
 
