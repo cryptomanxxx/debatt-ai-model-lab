@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pilot_eval import (SCORES, check_provenance, editor_items, editor_metrics, editor_prompt,  # noqa: E402
+from pilot_eval import (SCORES, Progress, check_provenance, editor_items, editor_metrics, editor_prompt,  # noqa: E402
                         film_review_items, find_dataset, is_film_review, parse_scores, read_jsonl,
                         submission_items, submission_metrics, train_mean_scores, utc_day)
 from smollm3_smoketest import fixed_strftime, require_cuda  # noqa: E402
@@ -88,7 +88,7 @@ def compare(items: list, base_pred: list, tuned_pred: list, fallback: dict, samp
             for k in SCORES}
 
 
-def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> dict:
+def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_id: str) -> dict:
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -120,20 +120,16 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
             enable_thinking=False, strftime_now=fixed_strftime(utc_day(row["skapad"])))
         return tokenizer(rendered, add_special_tokens=False).input_ids
 
-    def predict(rows: list) -> list:
-        model.eval()
-        preds = []
-        for row in rows:
-            ids = torch.tensor([prompt_ids(row)], device=model.device)
-            with torch.inference_mode():
-                out = model.generate(ids, max_new_tokens=GENERATION_TOKENS, do_sample=False,
-                                     pad_token_id=tokenizer.eos_token_id)
-            preds.append(parse_scores(tokenizer.decode(out[0, ids.shape[-1]:], skip_special_tokens=True)))
-        return preds
+    def predict_one(row: dict):
+        ids = torch.tensor([prompt_ids(row)], device=model.device)
+        with torch.inference_mode():
+            out = model.generate(ids, max_new_tokens=GENERATION_TOKENS, do_sample=False,
+                                 pad_token_id=tokenizer.eos_token_id)
+        return parse_scores(tokenizer.decode(out[0, ids.shape[-1]:], skip_special_tokens=True))
 
     def evaluate() -> dict:
-        preds = {"validation": predict(validation), "editor": predict(editor), "film_reviews": predict(films),
-                 "submissions": predict(submissions)}
+        model.eval()
+        preds = {key: progress.run(rows, predict_one) for key, rows in eval_sets}
         return {
             "predictions": preds,
             "metrics": {
@@ -152,7 +148,23 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
         if param.requires_grad:
             param.data = param.data.float()  # fp32 adapter weights, so the fp16 grad scaler can unscale them
 
+    end = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    encoded = [encode_example(prompt_ids(r), tokenizer(target_text(r), add_special_tokens=False).input_ids + [end],
+                              config["max_seq_tokens"]) for r in examples]
+    too_long = sum(e is None for e in encoded)
+    encoded = [e for e in encoded if e is not None]
+    # The loop flushes a final partial group, so each epoch takes ceil(len / grad_accum) optimizer steps.
+    total = config["epochs"] * -(-len(encoded) // config["grad_accum"])
+
+    # Progress phases, known up front: base evaluation, training steps, tuned evaluation.
+    eval_sets = [("validation", validation), ("editor", editor), ("film_reviews", films), ("submissions", submissions)]
+
+    def evaluation_phases(tag: str) -> list:
+        return [(f"{tag} evaluation: {key}", len(rows), "evaluation") for key, rows in eval_sets]
+    progress = Progress((evaluation_phases("base") if config["evaluate_base"] else [])
+                        + [("training steps", total, "training")] + evaluation_phases("tuned"), run_id)
     results = {"counts": {"train_rows": len(train_rows), "train_examples": len(examples),
+                          "train_examples_too_long": too_long,
                           "train_held_rows": sum(r["beslut"] != "publicera" for r in train_rows),
                           "validation_items": len(validation), "editor_items": len(editor),
                           "film_review_items": len(films), "submission_items": len(submissions)}}
@@ -160,17 +172,11 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
         with model.disable_adapter():
             base = evaluate()
 
-    end = tokenizer.convert_tokens_to_ids("<|im_end|>")
-    encoded = [encode_example(prompt_ids(r), tokenizer(target_text(r), add_special_tokens=False).input_ids + [end],
-                              config["max_seq_tokens"]) for r in examples]
-    results["counts"]["train_examples_too_long"] = sum(e is None for e in encoded)
-    encoded = [e for e in encoded if e is not None]
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=config["learning_rate"])
-    # The loop flushes a final partial group, so each epoch takes ceil(len / grad_accum) optimizer steps.
-    total = config["epochs"] * -(-len(encoded) // config["grad_accum"])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: max(0.0, 1 - step / max(1, total)))
     scaler = torch.amp.GradScaler("cuda")
     model.train()
+    progress.next_phase()
     losses, step = [], 0
     for _ in range(config["epochs"]):
         for i, example in enumerate(encoded, 1):
@@ -191,6 +197,7 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
                 scheduler.step()
                 step += 1
                 print(f"step {step}/{total} loss {sum(losses[-group:]) / group:.4f}", flush=True)
+                progress.tick(step)
     # The adapter stays in the private Kaggle output; the public workflow artifact uploads JSON and logs only.
     model.save_pretrained(output.parent / "editor-adapter")
     tuned = evaluate()
@@ -236,7 +243,7 @@ def main() -> None:
     # run_kaggle_kernel.sh accepts a result only if it records that the GPU was used.
     results = {"schema_version": 1, "run_id": args.run_id, "cuda_available": True, "config": config,
                "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__}
-    results |= run(config, data_dir, frozen["test_from"], torch, args.output)
+    results |= run(config, data_dir, frozen["test_from"], torch, args.output, args.run_id)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({k: results[k] for k in ("counts", "training", "tuned_minus_base") if k in results}, indent=2))

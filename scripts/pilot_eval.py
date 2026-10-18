@@ -4,6 +4,7 @@ import json
 import random
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,55 @@ Deadline: {deadline}
 Svara ENDAST med JSON (inga andra tecken):
 {{"sannolikhet": P}}
 där P är din egen bedömning i procent, ett heltal 0-100."""
+
+
+def minutes(seconds: float) -> str:
+    seconds = int(round(seconds))
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m" if seconds >= 3600 else f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+class Progress:
+    """Prints PROGRESS lines that the workflow relays from the Kaggle log while the run is going.
+
+    phases is a list of (name, item count, kind). The remaining time of the current phase uses its own pace; the
+    total also counts later phases, priced at the last measured pace of their kind (generation or training).
+    Until every remaining kind has been measured once, the total is reported as not known yet.
+    Each line names the workflow run, so the relay never shows an earlier run's progress as this one's."""
+
+    def __init__(self, phases: list, run_id: str, clock=time.monotonic, out=print, every: float = 60.0):
+        self.phases, self.run_id, self.clock, self.out, self.every = phases, run_id, clock, out, every
+        self.started = clock()
+        self.pace = {}
+        self.index, self.phase_start, self.last_print = -1, self.started, None
+
+    def next_phase(self) -> None:
+        self.index += 1
+        self.phase_start, self.last_print = self.clock(), None
+
+    def tick(self, done: int) -> None:
+        name, total, kind = self.phases[self.index]
+        now = self.clock()
+        if done < total and self.last_print is not None and now - self.last_print < self.every:
+            return
+        self.last_print = now
+        self.pace[kind] = (now - self.phase_start) / done
+        phase_left = self.pace[kind] * (total - done)
+        later = self.phases[self.index + 1:]
+        total_left = (None if any(k not in self.pace for _, _, k in later)
+                      else phase_left + sum(self.pace[k] * n for _, n, k in later))
+        self.out(f"PROGRESS run={self.run_id} phase {self.index + 1}/{len(self.phases)} {name} {done}/{total}"
+                 f" | phase left ~{minutes(phase_left)} | total left "
+                 f"{'~' + minutes(total_left) if total_left is not None else 'not known yet'}"
+                 f" | elapsed {minutes(now - self.started)}", flush=True)
+
+    def run(self, items: list, work) -> list:
+        """Apply work to each item in the next phase, reporting as it goes."""
+        self.next_phase()
+        results = []
+        for i, item in enumerate(items, 1):
+            results.append(work(item))
+            self.tick(i)
+        return results
 
 
 def load_config(path: str) -> dict:
@@ -291,7 +341,7 @@ def resolve_revision(model_id: str, revision):
 
 
 def run_model(spec: dict, config: dict, editor: list, films: list, submissions: list, markets: list, fallback: dict,
-              submission_fallback: dict, consensus_ids: set, torch) -> dict:
+              submission_fallback: dict, consensus_ids: set, torch, progress: Progress) -> dict:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     revision = resolve_revision(spec["id"], spec.get("revision"))
@@ -311,11 +361,11 @@ def run_model(spec: dict, config: dict, editor: list, films: list, submissions: 
         return tokenizer.decode(output[0, inputs.shape[-1]:], skip_special_tokens=True)
 
     # Each prompt is dated at its item's creation, so the "today" a template inserts matches what the item knew.
-    editor_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in editor]
-    film_raw = [generate(editor_prompt(a, config["max_article_chars"]), utc_day(a["skapad"]), 64) for a in films]
-    submission_raw = [generate(editor_prompt(s, config["max_article_chars"]), utc_day(s["skapad"]), 64)
-                      for s in submissions]
-    market_raw = [generate(market_prompt(m), utc_day(m["skapad"]), 32) for m in markets]
+    edit = lambda row: generate(editor_prompt(row, config["max_article_chars"]), utc_day(row["skapad"]), 64)  # noqa: E731
+    editor_raw = progress.run(editor, edit)
+    film_raw = progress.run(films, edit)
+    submission_raw = progress.run(submissions, edit)
+    market_raw = progress.run(markets, lambda m: generate(market_prompt(m), utc_day(m["skapad"]), 32))
     editor_pred = [parse_scores(text) for text in editor_raw]
     film_pred = [parse_scores(text) for text in film_raw]
     submission_pred = [parse_scores(text) for text in submission_raw]
@@ -366,6 +416,11 @@ def main() -> None:
     market_baselines = baselines(markets_all, bets, markets)
     consensus_ids = set(market_baselines["agent_consensus_market_ids"])
 
+    # Markets get their own kind: their answers are shorter, so they generate faster than editor scores.
+    progress = Progress([(f"{task} ({spec['id']})", len(rows), kind) for spec in config["models"]
+                         for task, rows, kind in (("editor", editor, "editor"), ("film reviews", films, "editor"),
+                                                  ("submissions", submissions, "editor"),
+                                                  ("markets", markets, "markets"))], args.run_id)
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
@@ -378,7 +433,7 @@ def main() -> None:
             "submissions_train_mean": submission_metrics(submissions, [None] * len(submissions), submission_fallback),
         },
         "models": [run_model(spec, config, editor, films, submissions, markets, fallback, submission_fallback,
-                             consensus_ids, torch) for spec in config["models"]],
+                             consensus_ids, torch, progress) for spec in config["models"]],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
