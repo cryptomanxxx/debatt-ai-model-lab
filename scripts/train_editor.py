@@ -160,7 +160,8 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
     results["counts"]["train_examples_too_long"] = sum(e is None for e in encoded)
     encoded = [e for e in encoded if e is not None]
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=config["learning_rate"])
-    total = config["epochs"] * len(encoded) // config["grad_accum"]
+    # The loop flushes a final partial group, so each epoch takes ceil(len / grad_accum) optimizer steps.
+    total = config["epochs"] * -(-len(encoded) // config["grad_accum"])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: max(0.0, 1 - step / max(1, total)))
     scaler = torch.amp.GradScaler("cuda")
     model.train()
@@ -201,6 +202,8 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
                                   submission_fallback, samples, seed),
             "editor": compare(editor, base["predictions"]["editor"], tuned["predictions"]["editor"], fallback,
                               samples, seed),
+            "film_reviews": compare(films, base["predictions"]["film_reviews"], tuned["predictions"]["film_reviews"],
+                                    fallback, samples, seed),
             "submissions": compare(submissions, base["predictions"]["submissions"],
                                    tuned["predictions"]["submissions"], submission_fallback, samples, seed),
         }
@@ -223,7 +226,8 @@ def main() -> None:
     frozen = json.loads(args.frozen.read_text(encoding="utf-8"))
     data_dir = find_dataset(args.data_root)
     check_provenance(data_dir, args.run_id, frozen)
-    results = {"schema_version": 1, "run_id": args.run_id, "config": config,
+    # run_kaggle_kernel.sh accepts a result only if it records that the GPU was used.
+    results = {"schema_version": 1, "run_id": args.run_id, "cuda_available": True, "config": config,
                "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__}
     results |= run(config, data_dir, frozen["test_from"], torch, args.output)
     args.output.parent.mkdir(parents=True, exist_ok=True)
