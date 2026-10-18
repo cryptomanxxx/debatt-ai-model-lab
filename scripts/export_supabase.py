@@ -69,9 +69,11 @@ def require_service_key(key: str) -> None:
 
 def read_only_request(url: str, key: str) -> urllib.request.Request:
     """Build the only kind of request this script sends: a GET. The service role key could write, so nothing else."""
-    request = urllib.request.Request(url, method="GET", headers={
-        "apikey": key, "Authorization": f"Bearer {key}", "Prefer": "count=exact",
-    })
+    headers = {"apikey": key, "Prefer": "count=exact"}
+    # Opaque sb_publishable_/sb_secret_ keys go in apikey only; Supabase rejects them as bearer JWTs.
+    if not key.startswith("sb_"):
+        headers["Authorization"] = f"Bearer {key}"
+    request = urllib.request.Request(url, method="GET", headers=headers)
     if request.get_method() != "GET" or request.data is not None:
         raise RuntimeError("Refusing a non-GET request to Supabase")
     return request

@@ -213,6 +213,14 @@ def test_requests_are_get_only():
     assert request.get_method() == "GET" and request.data is None
 
 
+def test_opaque_keys_are_not_sent_as_bearer_tokens():
+    url = "https://x.supabase.co/rest/v1/inlamningar"
+    opaque = export_supabase.read_only_request(url, "sb_secret_abc")
+    assert opaque.get_header("Apikey") == "sb_secret_abc" and not opaque.has_header("Authorization")
+    legacy = export_supabase.read_only_request(url, jwt("service_role"))
+    assert legacy.get_header("Authorization") == f"Bearer {jwt('service_role')}"
+
+
 def test_private_table_requests_only_ai_rows():
     fetch, urls = fake_server([[{"id": 1, "kalla": "ai"}]], 1)
     rows = export_supabase.fetch_private_table("https://x.supabase.co", "k", "inlamningar", fetch=fetch)
