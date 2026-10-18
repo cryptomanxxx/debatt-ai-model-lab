@@ -314,8 +314,8 @@ def run_model(spec: dict, config: dict, editor: list, submissions: list, markets
         "markets": market_metrics(markets, market_pred, consensus_ids),
         "predictions": {
             "editor": [{"id": a["id"], "raw": raw, "scores": p} for a, raw, p in zip(editor, editor_raw, editor_pred)],
-            "submissions": [{"id": s["id"], "raw": raw, "scores": p}
-                            for s, raw, p in zip(submissions, submission_raw, submission_pred)],
+            # No raw replies: a model may echo the unpublished submission, and the results go to a public artifact.
+            "submissions": [{"id": s["id"], "scores": p} for s, p in zip(submissions, submission_pred)],
             "markets": [{"id": m["id"], "raw": raw, "probability": p} for m, raw, p in zip(markets, market_raw, market_pred)],
         },
     }

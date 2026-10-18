@@ -62,7 +62,7 @@ Three tasks are scored:
 
 Every prompt is dated at its item's creation, including the date a chat template inserts. An unparsable reply is scored rather than dropped: the training mean for the editor, 50% for markets.
 
-The job summary shows the table; the artifact holds every raw reply. A model with `"revision": null` is resolved to its current Hugging Face commit at run time, and that commit is recorded in the results; pin it in the config afterwards.
+The job summary shows the tables; the artifact holds every raw reply, except for submissions, where only the parsed scores are kept so that an echoed unpublished text cannot reach the public artifact. A model with `"revision": null` is resolved to its current Hugging Face commit at run time, and that commit is recorded in the results; pin it in the config afterwards.
 
 Needs the Kaggle secrets above, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`; the workflow checks all of them before it starts.
 
