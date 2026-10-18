@@ -294,6 +294,10 @@ def test_committed_frozen_set_v1_records_its_columns():
     for table, spec in frozen["tables"].items():
         # v1 was hashed before filmrecension was exported; every other exported column is covered.
         assert spec["columns"] == [c for c in export_supabase.COLUMNS[table] if c != "filmrecension"]
+        # The film review flags decide task membership, so they are frozen with their rows.
+        assert set(spec.get("flags", {})) == set(export_supabase.FLAG_COLUMNS.get(table, []))
+        for ids in spec.get("flags", {}).values():
+            assert ids == sorted(set(ids)) and set(ids) <= set(spec["ids"])
 
 
 def test_film_reviews_are_counted(tmp_path):
