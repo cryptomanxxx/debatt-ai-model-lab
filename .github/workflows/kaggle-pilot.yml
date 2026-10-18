@@ -60,7 +60,7 @@ jobs:
           b, k = r["baselines"], ("arg", "ori", "rel", "tro")
           f = lambda v: "-" if v is None else f"{v:.2f}"
           print("## Pilot evaluation\n")
-          print(f"{r['editor_items']} editor articles, {r['submission_items']} submissions, {r['market_items']} resolved markets, GPU {r['gpu_name']}\n")
+          print(f"{r['editor_items']} editor articles (film reviews excluded), {r['film_review_items']} film reviews, {r['submission_items']} submissions, {r['market_items']} resolved markets, GPU {r['gpu_name']}\n")
           print("| Model | Editor parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Answer spread (std) arg/ori/rel/tro | Markets parsed | Distinct | Brier (all) | Brier (consensus markets) |")
           print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
           for m in r["models"]:
@@ -76,6 +76,12 @@ jobs:
                 f"agent consensus (bets by creation day) Brier {f(b['agent_consensus_brier'])} on {b['agent_consensus_markets']} markets")
           print("\nUnparsable replies are scored, not dropped: training-mean scores for the editor, 50% for markets.")
           print("Distinct answers and spread count parsed replies only. A model with 1 distinct answer is repeating itself; its MAE says nothing about individual items.\n")
+          print("\n### Film reviews (published, test split only; the training split has none)\n")
+          print("| Model | Parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro |")
+          print("| --- | --- | --- | --- | --- |")
+          for name, s in [(m["id"], m["film_reviews"]) for m in r["models"]] + [("training mean", b["film_reviews_train_mean"])]:
+              print(f"| {name} | {s['parsed']}/{s['n']} | {s['distinct_predictions'] if s['distinct_predictions'] is not None else '-'} "
+                    f"| {' / '.join(f(s[x]['mae']) for x in k)} | {' / '.join(f(s[x]['spearman']) for x in k)} |")
           print("\n### Submissions (accepted and rejected AI-agent texts)\n")
           print("Publish if all four scores are at least 6, as on Debatt-AI. Balanced accuracy is the mean of both recalls; always publishing scores 0.50.\n")
           print("| Model | Parsed | Distinct answers | MAE arg/ori/rel/tro | Spearman arg/ori/rel/tro | Recall published | Recall not published | Balanced accuracy |")

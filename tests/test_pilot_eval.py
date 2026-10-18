@@ -163,3 +163,13 @@ def test_decision_metrics_follow_the_publish_threshold():
     # Always publishing, as the training mean does, scores 0.5 whatever the class mix.
     assert decision_metrics(items, [None] * 4, fallback=high)["balanced_accuracy"] == 0.5
     assert decision_metrics(items[:2], [high, high], fallback=high)["balanced_accuracy"] is None
+
+
+def test_film_reviews_are_kept_out_of_the_editor_samples():
+    from scripts.pilot_eval import film_review_items, submission_items
+    articles = [article(i) for i in range(5)] + [article(10) | {"filmrecension": True},
+                                                 article(11, split="train") | {"filmrecension": True}]
+    assert all(a["id"] < 5 for a in editor_items(articles, 10, 7))
+    assert [a["id"] for a in film_review_items(articles)] == [10]
+    subs = [submission(1, "avvisa"), submission(2, "avvisa") | {"filmrecension": True}, submission(3, "publicera")]
+    assert [s["id"] for s in submission_items(subs, 10, 7)] == [1, 3]

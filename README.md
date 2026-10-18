@@ -55,8 +55,9 @@ The manual **Kaggle GPU Pilot Evaluation** workflow:
 2. uploads it as the private Kaggle dataset `debatt-ai-eval-data`, tagged with the workflow run;
 3. runs `scripts/pilot_eval.py` on a Kaggle T4 for every model in `configs/pilot.json`.
 
-Three tasks are scored:
+Three tasks are scored, plus film reviews on their own:
 - **Editor:** a seeded sample of test articles is scored on `arg`/`ori`/`rel`/`tro`. The prompt uses the Debatt-AI editor's criteria, and predictions are compared with the stored editor scores (MAE and Spearman). The training-mean scores are reported as a baseline.
+- **Film reviews:** published test film reviews (`filmrecension`) are scored like the editor task but reported separately, and excluded from the editor and submission samples. The training split holds none, so mixing them in would test an unseen genre.
 - **Submissions:** every test submission the editor did not publish (`revidera`, `avvisa`), topped up with a seeded sample of published ones, is scored the same way. The scores also imply a decision (publish if all four are at least 6, as on Debatt-AI), reported as recall per class and balanced accuracy against the editor's `beslut`. The training mean of the submissions is the baseline.
 - **Markets:** every resolved test market gets a probability, dated at market creation, and is scored with Brier. The training base rate and the agents' consensus are scored as baselines; the consensus counts only bets placed by the market's creation day.
 
