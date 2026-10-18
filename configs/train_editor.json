@@ -1,0 +1,23 @@
+{
+  "model": {"id": "Qwen/Qwen3-4B", "revision": "1cfa9a7208912126459214e8b04321603b3df60c"},
+  "seed": 20261018,
+  "max_article_chars": 3000,
+  "max_seq_tokens": 1536,
+  "validation_days": 21,
+  "train_published_sample": 600,
+  "held_weight": 6,
+  "lora": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  },
+  "learning_rate": 0.0002,
+  "epochs": 1,
+  "grad_accum": 8,
+  "editor_sample": 200,
+  "submission_sample": 300,
+  "validation_sample": 150,
+  "bootstrap_samples": 1000,
+  "evaluate_base": true
+}

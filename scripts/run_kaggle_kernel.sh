@@ -4,13 +4,16 @@ set -euo pipefail
 kernel="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
 # The task's result file; the smoke test stays the default.
 result_file="${KAGGLE_RESULT_FILE:-smollm3_smoketest.json}"
+# Kaggle run time limit (seconds) and how many one-minute status polls to wait; training needs more than evaluation.
+kernel_timeout="${KAGGLE_KERNEL_TIMEOUT:-5700}"
+max_polls="${KAGGLE_MAX_POLLS:-100}"
 : "${GITHUB_SHA:?GITHUB_SHA must be set}"
 : "${EXPERIMENT_RUN_ID:?EXPERIMENT_RUN_ID must be set}"
 mkdir -p kaggle-results
 
 # CLI versions can print "Kernel push error" yet return exit status 0.
 # Fail closed unless the CLI explicitly confirms a successful new version.
-if ! kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 --timeout 5700 > kaggle-results/submission.log 2>&1; then
+if ! kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 --timeout "$kernel_timeout" > kaggle-results/submission.log 2>&1; then
   cat kaggle-results/submission.log
   echo "::error::Kaggle submission command failed"
   exit 1
@@ -28,7 +31,7 @@ fi
 # Only the exact completed state qualifies; never trust a previous version's
 # result merely because status reports COMPLETE.
 completed=0
-for i in $(seq 1 100); do
+for i in $(seq 1 "$max_polls"); do
   status="$(kaggle kernels status "$kernel" 2>&1)" || {
     echo "$status" | tee -a kaggle-results/status.log
     exit 1
