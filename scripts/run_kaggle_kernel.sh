@@ -29,13 +29,14 @@ if ! grep -Eiq 'kernel version [0-9]+ successfully pushed|kernel version [0-9]+ 
 fi
 
 # The live stream replays the running session from its start, so a short time-boxed attach yields its newest
-# PROGRESS line; unbuffered, so lines printed before the timeout are not lost. It comes first because the
-# one-shot log may still hold an earlier session's output. Neither fetch may block or fail the polling loop.
+# PROGRESS line; unbuffered, so lines printed before the timeout are not lost. The one-shot log is a fallback.
+# Lines must carry this workflow run's id, so an earlier session's log is never shown as this run's progress.
+# Neither fetch may block or fail the polling loop.
 latest_progress() {
-  local line
-  line="$(PYTHONUNBUFFERED=1 timeout 20 kaggle kernels logs "$kernel" --follow 2>/dev/null | grep -Eo 'PROGRESS [^"\\]*' | tail -n 1 || true)"
+  local line pattern="PROGRESS run=${EXPERIMENT_RUN_ID} [^\"\\\\]*"
+  line="$(PYTHONUNBUFFERED=1 timeout 20 kaggle kernels logs "$kernel" --follow 2>/dev/null | grep -Eo "$pattern" | tail -n 1 || true)"
   if [ -z "$line" ]; then
-    line="$(timeout 20 kaggle kernels logs "$kernel" 2>/dev/null | grep -Eo 'PROGRESS [^"\\]*' | tail -n 1 || true)"
+    line="$(timeout 20 kaggle kernels logs "$kernel" 2>/dev/null | grep -Eo "$pattern" | tail -n 1 || true)"
   fi
   printf '%s' "$line"
 }

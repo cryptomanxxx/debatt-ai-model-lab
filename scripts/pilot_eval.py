@@ -53,10 +53,11 @@ class Progress:
 
     phases is a list of (name, item count, kind). The remaining time of the current phase uses its own pace; the
     total also counts later phases, priced at the last measured pace of their kind (generation or training).
-    Until every remaining kind has been measured once, the total is reported as not known yet."""
+    Until every remaining kind has been measured once, the total is reported as not known yet.
+    Each line names the workflow run, so the relay never shows an earlier run's progress as this one's."""
 
-    def __init__(self, phases: list, clock=time.monotonic, out=print, every: float = 60.0):
-        self.phases, self.clock, self.out, self.every = phases, clock, out, every
+    def __init__(self, phases: list, run_id: str, clock=time.monotonic, out=print, every: float = 60.0):
+        self.phases, self.run_id, self.clock, self.out, self.every = phases, run_id, clock, out, every
         self.started = clock()
         self.pace = {}
         self.index, self.phase_start, self.last_print = -1, self.started, None
@@ -76,7 +77,7 @@ class Progress:
         later = self.phases[self.index + 1:]
         total_left = (None if any(k not in self.pace for _, _, k in later)
                       else phase_left + sum(self.pace[k] * n for _, n, k in later))
-        self.out(f"PROGRESS phase {self.index + 1}/{len(self.phases)} {name} {done}/{total}"
+        self.out(f"PROGRESS run={self.run_id} phase {self.index + 1}/{len(self.phases)} {name} {done}/{total}"
                  f" | phase left ~{minutes(phase_left)} | total left "
                  f"{'~' + minutes(total_left) if total_left is not None else 'not known yet'}"
                  f" | elapsed {minutes(now - self.started)}", flush=True)
@@ -419,7 +420,7 @@ def main() -> None:
     progress = Progress([(f"{task} ({spec['id']})", len(rows), kind) for spec in config["models"]
                          for task, rows, kind in (("editor", editor, "editor"), ("film reviews", films, "editor"),
                                                   ("submissions", submissions, "editor"),
-                                                  ("markets", markets, "markets"))])
+                                                  ("markets", markets, "markets"))], args.run_id)
     results = {
         "schema_version": 1, "run_id": args.run_id, "cuda_available": True,
         "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__,

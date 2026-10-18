@@ -82,7 +82,7 @@ The manual **AI Model Training (Kaggle GPU)** workflow fine-tunes Qwen3-4B as th
 While a Kaggle run is running, the workflow log shows its latest progress line after each status check, for example:
 
 ```
-PROGRESS phase 6/9 training steps 40/111 | phase left ~38m10s | total left ~1h24m | elapsed 1h02m
+PROGRESS run=39119404135-1 phase 6/9 training steps 40/111 | phase left ~38m10s | total left ~1h24m | elapsed 1h02m
 ```
 
 The phase estimate uses the phase's own pace. The total also prices the remaining phases at the last measured pace of their kind (evaluation or training), and reads "not known yet" until every remaining kind has been measured once. Time spent in Kaggle's queue is not counted.

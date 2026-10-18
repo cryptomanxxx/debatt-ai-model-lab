@@ -88,7 +88,7 @@ def compare(items: list, base_pred: list, tuned_pred: list, fallback: dict, samp
             for k in SCORES}
 
 
-def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> dict:
+def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_id: str) -> dict:
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -162,7 +162,7 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path) -> di
     def evaluation_phases(tag: str) -> list:
         return [(f"{tag} evaluation: {key}", len(rows), "evaluation") for key, rows in eval_sets]
     progress = Progress((evaluation_phases("base") if config["evaluate_base"] else [])
-                        + [("training steps", total, "training")] + evaluation_phases("tuned"))
+                        + [("training steps", total, "training")] + evaluation_phases("tuned"), run_id)
     results = {"counts": {"train_rows": len(train_rows), "train_examples": len(examples),
                           "train_examples_too_long": too_long,
                           "train_held_rows": sum(r["beslut"] != "publicera" for r in train_rows),
@@ -243,7 +243,7 @@ def main() -> None:
     # run_kaggle_kernel.sh accepts a result only if it records that the GPU was used.
     results = {"schema_version": 1, "run_id": args.run_id, "cuda_available": True, "config": config,
                "gpu_name": torch.cuda.get_device_name(0), "torch_version": torch.__version__}
-    results |= run(config, data_dir, frozen["test_from"], torch, args.output)
+    results |= run(config, data_dir, frozen["test_from"], torch, args.output, args.run_id)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({k: results[k] for k in ("counts", "training", "tuned_minus_base") if k in results}, indent=2))
