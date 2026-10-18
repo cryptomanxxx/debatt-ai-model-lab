@@ -221,3 +221,4 @@ __marimo__/
 
 # Exported datasets (Actions artifacts only, never committed)
 data/
+reports/

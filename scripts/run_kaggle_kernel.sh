@@ -2,6 +2,8 @@
 set -euo pipefail
 
 kernel="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+# The task's result file; the smoke test stays the default.
+result_file="${KAGGLE_RESULT_FILE:-smollm3_smoketest.json}"
 : "${GITHUB_SHA:?GITHUB_SHA must be set}"
 : "${EXPERIMENT_RUN_ID:?EXPERIMENT_RUN_ID must be set}"
 mkdir -p kaggle-results
@@ -67,21 +69,21 @@ kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/outpu
 
 # Provenance is written by the remote runner AFTER the model test succeeds.
 # A stale result from a previous Kaggle kernel version must be rejected.
-python - "$GITHUB_SHA" "$EXPERIMENT_RUN_ID" <<'PY'
+python - "$GITHUB_SHA" "$EXPERIMENT_RUN_ID" "$result_file" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 result_dir = Path("kaggle-results")
 provenance = result_dir / "experiment_provenance.json"
-result = result_dir / "smollm3_smoketest.json"
+result = result_dir / sys.argv[3]
 if not provenance.is_file() or not result.is_file():
     raise SystemExit("Missing experiment result or provenance: run not verified")
 record = json.loads(provenance.read_text(encoding="utf-8"))
 if record.get("git_sha") != sys.argv[1] or record.get("run_id") != sys.argv[2]:
     raise SystemExit("Kaggle result provenance does not match the GitHub commit and workflow run")
 data = json.loads(result.read_text(encoding="utf-8"))
-if not data.get("cuda_available") or not data.get("response"):
+if not data.get("cuda_available") or (sys.argv[3] == "smollm3_smoketest.json" and not data.get("response")):
     raise SystemExit("Kaggle GPU result is invalid or incomplete")
 print("Verified Kaggle result provenance for", sys.argv[1], sys.argv[2])
 PY

@@ -35,3 +35,23 @@ def test_reject_invalid_username(tmp_path: Path):
 def test_invalid_run_identifier(tmp_path: Path):
     with pytest.raises(ValueError, match="Invalid run identifier"):
         prepare("a" * 40, "researcher", tmp_path, "bad/run")
+
+
+def test_prepare_pilot_kernel(tmp_path: Path):
+    prepare("b" * 40, "researcher", tmp_path, "555-1", task="pilot")
+    metadata = json.loads((tmp_path / "kernel-metadata.json").read_text())
+    script = (tmp_path / "run.py").read_text()
+    assert metadata["id"] == "researcher/debatt-ai-pilot-gpu"
+    assert metadata["dataset_sources"] == ["researcher/debatt-ai-eval-data"]
+    assert "scripts/pilot_eval.py" in script and "'--run-id', '555-1'" in script
+    assert "smollm3_smoketest.py" not in script
+
+
+def test_smoketest_kernel_has_no_dataset(tmp_path: Path):
+    prepare("b" * 40, "researcher", tmp_path, "555-1")
+    assert json.loads((tmp_path / "kernel-metadata.json").read_text())["dataset_sources"] == []
+
+
+def test_unknown_task_rejected(tmp_path: Path):
+    with pytest.raises(ValueError, match="Unknown task"):
+        prepare("b" * 40, "researcher", tmp_path, "555-1", task="train")

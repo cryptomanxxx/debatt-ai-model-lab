@@ -1,0 +1,30 @@
+name: Judge API Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  judges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: List models and send one synthetic prompt per judge
+        env:
+          HIP_API_KEY: ${{ secrets.HIP_API_KEY }}
+          BLABLADOR_API_KEY: ${{ secrets.BLABLADOR_API_KEY }}
+        run: python scripts/judge_smoke.py
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judge-smoke-${{ github.run_id }}
+          path: reports/judge-smoke.json
+          retention-days: 14
+          if-no-files-found: ignore
