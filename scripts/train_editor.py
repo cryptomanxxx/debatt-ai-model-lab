@@ -67,8 +67,11 @@ def training_examples(rows: list, published_sample: int, held_share: float, seed
     return examples, weight
 
 
-# Swedish abbreviations whose final period is not a sentence end (multi-part ones like t.ex. are caught by pattern).
-ABBREVIATIONS = {"dvs", "osv", "etc", "ca", "nr", "resp", "jfr", "kap", "st", "tex", "bla", "mfl", "sk", "pga"}
+# Swedish abbreviations whose final period does not end a sentence: they lead into more text (multi-part ones like
+# t.ex. are caught by pattern). List-closing ones (osv., etc., m.fl.) often end a sentence, so they count as an end
+# when a capital letter follows, like any other period.
+ABBREVIATIONS = {"dvs", "ca", "nr", "resp", "jfr", "kap", "st", "tex", "bla", "sk", "pga"}
+SENTENCE_FINAL_ABBREVIATIONS = {"osv", "etc", "mfl", "m.fl"}
 
 
 def sentence_ends(text: str) -> list:
@@ -77,7 +80,8 @@ def sentence_ends(text: str) -> list:
     ends = []
     for match in re.finditer(r"[.!?](?=\s+[A-ZÅÄÖ0-9\"(]|\s*$)", text):
         word = re.search(r"(\S*)$", text[:match.start()]).group(1).lower()
-        if match.group() == "." and (word in ABBREVIATIONS or re.fullmatch(r"(?:\w{1,3}\.)+\w{1,3}", word)):
+        if match.group() == "." and word not in SENTENCE_FINAL_ABBREVIATIONS and (
+                word in ABBREVIATIONS or re.fullmatch(r"(?:\w{1,3}\.)+\w{1,3}", word)):
             continue
         ends.append(match.end())
     return ends

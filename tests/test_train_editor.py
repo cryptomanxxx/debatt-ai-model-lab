@@ -50,6 +50,9 @@ def test_reasoning_target_keeps_the_editor_motivering_short():
     # Abbreviations are not sentence ends, so two real sentences survive whole.
     text = "Bra källor, t.ex. SCB och bl.a. Riksbanken, dvs. Stark tes. Svag slutsats. Tredje."
     assert short_reasoning(text, 300) == "Bra källor, t.ex. SCB och bl.a. Riksbanken, dvs. Stark tes. Svag slutsats."
+    # A list-closing abbreviation that ends a sentence still counts toward the two-sentence limit.
+    assert short_reasoning("Vi kan göra så osv. Nästa skäl. Sista skäl.", 300) == "Vi kan göra så osv. Nästa skäl."
+    assert short_reasoning("Svensk, norsk m.fl. Andra skäl. Tredje.", 300) == "Svensk, norsk m.fl. Andra skäl."
     target = json.loads(target_text(row, reasoning=True, max_reasoning_chars=30))
     assert list(target) == ["motivering", "arg", "ori", "rel", "tro"] and target["motivering"] == "Svag källa. Oklar tes!"
     # Without reasoning the answer is the four scores only, as in the pilot prompt.
