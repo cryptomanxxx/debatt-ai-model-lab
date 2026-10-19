@@ -86,7 +86,11 @@ Oraklet's experiments are not exported: they are run directly from `debatt-ai-or
 
 ## 8. Release criteria for 1.0
 
-1. Editor: lower mean absolute error than the untuned base on every score dimension, with non-overlapping confidence intervals.
+1. Editor, all of:
+   - on the test submissions and articles: lower mean absolute error than an answer that is always the training mean, on every score dimension, with the paired 95% bootstrap interval of the difference below zero, and a Spearman correlation with the editor's scores above zero on every dimension;
+   - on the test submissions, the main task: the same MAE bar against the untuned base, and a balanced accuracy of the implied publish decision above 0.50. Articles are all published, so they have no hold-back class to measure; the base is evaluated on submissions only to fit the time budget.
+
+   The training-mean bar was added after the first training run (run [39119404135](https://github.com/cryptomanxxx/debatt-ai-model-lab/actions/runs/39119404135)): the tuned model beat the base on MAE with intervals well below zero, but it gave the same two or three answers to every text, matched the training mean, lost the base's ranking and published everything. Lower MAE alone does not show judgment when the editor's scores barely vary.
 2. Article writing: win rate of at least 60% vs. the untuned base, with the lower confidence bound above 50%, and no more invented sources than the current production model.
 3. No regression of more than about 2 points on EuroEval (Swedish).
 4. Human spot checks confirm the judge's verdict.

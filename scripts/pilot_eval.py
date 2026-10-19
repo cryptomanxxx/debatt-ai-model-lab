@@ -32,6 +32,15 @@ Rubrik: {rubrik}
 
 {artikel}"""
 
+# Same criteria, but the answer starts with a short justification, so a fine-tuned model learns why a text gets its
+# scores instead of a constant answer. Used by the editor training; the pilot keeps the scores-only prompt.
+REASONED_EDITOR_PROMPT = EDITOR_PROMPT.replace(
+    """{{"arg": A, "ori": O, "rel": R, "tro": T}}
+där A, O, R och T är dina egna heltal 0-10 för respektive kriterium.""",
+    """{{"motivering": M, "arg": A, "ori": O, "rel": R, "tro": T}}
+där M är din egen korta motivering (högst två meningar) och A, O, R och T är dina egna heltal 0-10 för respektive
+kriterium.""")
+
 MARKET_PROMPT = """Dagens datum är {today}. Uppskatta sannolikheten att följande händer före deadline.
 
 Fråga: {titel}
@@ -61,10 +70,18 @@ class Progress:
         self.started = clock()
         self.pace = {}
         self.index, self.phase_start, self.last_print = -1, self.started, None
+        self.finished = []
 
     def next_phase(self) -> None:
+        if self.index >= 0:
+            self.finished.append((self.phases[self.index][0], self.clock() - self.phase_start))
         self.index += 1
         self.phase_start, self.last_print = self.clock(), None
+
+    def durations(self) -> dict:
+        """Seconds per phase so far, including the current one; useful to plan the next run's time budget."""
+        current = [(self.phases[self.index][0], self.clock() - self.phase_start)] if self.index >= 0 else []
+        return {name: round(seconds) for name, seconds in self.finished + current}
 
     def tick(self, done: int) -> None:
         name, total, kind = self.phases[self.index]
@@ -171,8 +188,8 @@ def market_items(markets: list) -> list:
                    and m.get("utfall") in ("ja", "nej")), key=lambda m: m["id"])
 
 
-def editor_prompt(article: dict, max_chars: int) -> str:
-    return EDITOR_PROMPT.format(rubrik=article.get("rubrik") or "", artikel=(article.get("artikel") or "")[:max_chars])
+def editor_prompt(article: dict, max_chars: int, reasoned: bool = False) -> str:
+    return (REASONED_EDITOR_PROMPT if reasoned else EDITOR_PROMPT).format(rubrik=article.get("rubrik") or "", artikel=(article.get("artikel") or "")[:max_chars])
 
 
 def market_prompt(market: dict) -> str:

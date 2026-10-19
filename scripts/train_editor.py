@@ -1,7 +1,9 @@
 """QLoRA fine-tuning of the AI editor on training-split submissions, evaluated on the frozen test set.
 
 Only the training split is used for training; the last days before the test window are held out as validation.
-Submissions the editor did not publish are rare in training, so they are repeated (weighted up)."""
+Submissions the editor did not publish are rare in training, so they are repeated (weighted up) until they make up
+held_share of the examples. With reasoning on, the answer starts with the editor's own justification (motivering),
+so the model has to learn why a text gets its scores rather than one constant answer."""
 import argparse
 import json
 import random
@@ -16,17 +18,23 @@ from pilot_eval import (SCORES, Progress, check_provenance, editor_items, editor
                         submission_items, submission_metrics, train_mean_scores, utc_day)
 from smollm3_smoketest import fixed_strftime, require_cuda  # noqa: E402
 
-GENERATION_TOKENS = 64
+EVAL_TASKS = ("validation", "editor", "film_reviews", "submissions")
 
 
 def load_config(path: str) -> dict:
     config = json.loads(Path(path).read_text(encoding="utf-8"))
     if not re.fullmatch(r"[0-9a-f]{40}", config["model"].get("revision") or ""):
         raise ValueError("model.revision must be a 40-character commit SHA")
-    for key in ("train_published_sample", "held_weight", "validation_days", "epochs", "grad_accum", "max_seq_tokens",
-                "editor_sample", "submission_sample", "validation_sample", "bootstrap_samples"):
+    for key in ("train_published_sample", "validation_days", "epochs", "grad_accum", "max_seq_tokens",
+                "editor_sample", "submission_sample", "validation_sample", "bootstrap_samples", "generation_tokens",
+                "max_reasoning_chars"):
         if not isinstance(config.get(key), int) or config[key] <= 0:
             raise ValueError(f"{key} must be a positive integer")
+    if not 0 < config.get("held_share", 0) < 1:
+        raise ValueError("held_share must be between 0 and 1")
+    for key in ("base_eval_tasks", "tuned_eval_tasks"):
+        if not set(config.get(key, [])) <= set(EVAL_TASKS):
+            raise ValueError(f"{key} must be a subset of {EVAL_TASKS}")
     return config
 
 
@@ -42,18 +50,60 @@ def split_training(submissions: list, test_from: str, validation_days: int) -> t
     return ([s for s in usable if utc_day(s["skapad"]) < cutoff], [s for s in usable if utc_day(s["skapad"]) >= cutoff])
 
 
-def training_examples(rows: list, published_sample: int, held_weight: int, seed: int) -> list:
-    """A seeded sample of published submissions plus every held one repeated held_weight times, shuffled."""
+def held_weight(published: int, held: int, share: float) -> int:
+    """How often to repeat each held submission so that held ones make up about share of the examples."""
+    return max(1, round(share / (1 - share) * published / held)) if held else 1
+
+
+def training_examples(rows: list, published_sample: int, held_share: float, seed: int) -> tuple:
+    """A seeded sample of published submissions plus every held one repeated to reach held_share, shuffled."""
     rng = random.Random(seed)
-    published = [r for r in rows if r["beslut"] == "publicera"]
+    published = rng.sample([r for r in rows if r["beslut"] == "publicera"],
+                           min(published_sample, sum(r["beslut"] == "publicera" for r in rows)))
     held = [r for r in rows if r["beslut"] != "publicera"]
-    examples = rng.sample(published, min(published_sample, len(published))) + held * held_weight
+    weight = held_weight(len(published), len(held), held_share)
+    examples = published + held * weight
     rng.shuffle(examples)
-    return examples
+    return examples, weight
 
 
-def target_text(row: dict) -> str:
-    return json.dumps({k: row[k] for k in SCORES})
+# Swedish abbreviations whose final period does not end a sentence: they lead into more text (multi-part ones like
+# t.ex. are caught by pattern). List-closing ones (osv., etc., m.fl.) often end a sentence, so they count as an end
+# when a capital letter follows, like any other period.
+ABBREVIATIONS = {"dvs", "ca", "nr", "resp", "jfr", "kap", "st", "tex", "bla", "sk", "pga"}
+SENTENCE_FINAL_ABBREVIATIONS = {"osv", "etc", "mfl", "m.fl"}
+
+
+def sentence_ends(text: str) -> list:
+    """Offsets just after each sentence end: ., ! or ? before a capital letter, digit or the end of the text,
+    unless the period closes an abbreviation such as t.ex., bl.a. or dvs."""
+    ends = []
+    for match in re.finditer(r"[.!?](?=\s+[A-ZÅÄÖ0-9\"(]|\s*$)", text):
+        word = re.search(r"(\S*)$", text[:match.start()]).group(1).lower()
+        if match.group() == "." and word not in SENTENCE_FINAL_ABBREVIATIONS and (
+                word in ABBREVIATIONS or re.fullmatch(r"(?:\w{1,3}\.)+\w{1,3}", word)):
+            continue
+        ends.append(match.end())
+    return ends
+
+
+def short_reasoning(text: str, max_chars: int, max_sentences: int = 2) -> str:
+    """The editor's motivering, at most max_sentences sentences (as the prompt asks) and max_chars characters.
+
+    Cut at the last sentence end that fits, or hard at max_chars when no sentence end does."""
+    text = " ".join((text or "").split())
+    ends = sentence_ends(text)
+    if len(ends) > max_sentences:
+        text = text[:ends[max_sentences - 1]]
+    if len(text) <= max_chars:
+        return text
+    fitting = [end for end in ends if end <= max_chars]
+    return text[:fitting[-1]] if fitting else text[:max_chars]
+
+
+def target_text(row: dict, reasoning: bool = False, max_reasoning_chars: int = 300) -> str:
+    answer = {"motivering": short_reasoning(row.get("motivering"), max_reasoning_chars)} if reasoning else {}
+    return json.dumps(answer | {k: row[k] for k in SCORES}, ensure_ascii=False)
 
 
 def encode_example(prompt_ids: list, target_ids: list, max_tokens: int):
@@ -92,20 +142,25 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_i
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-    seed, chars = config["seed"], config["max_article_chars"]
+    seed, chars, reasoning = config["seed"], config["max_article_chars"], config["reasoning"]
     random.seed(seed)
     torch.manual_seed(seed)
     articles = read_jsonl(data_dir / "artiklar.jsonl")
     submissions_all = read_jsonl(data_dir / "inlamningar.jsonl")
     train_rows, validation_rows = split_training(submissions_all, test_from, config["validation_days"])
-    examples = training_examples(train_rows, config["train_published_sample"], config["held_weight"], seed)
+    examples, weight = training_examples(train_rows, config["train_published_sample"], config["held_share"], seed)
     # Validation uses the submission sampler on the held-out days; it never touches the test split.
     validation = submission_items([dict(r, split="test") for r in validation_rows], config["validation_sample"], seed)
-    editor = editor_items(articles, config["editor_sample"], seed)
-    films = film_review_items(articles)
-    submissions = submission_items(submissions_all, config["submission_sample"], seed)
     fallback = train_mean_scores(articles)
     submission_fallback = train_mean_scores([dict(r, split="train") for r in train_rows])
+    # Each task: its items, metric function and the training-mean fallback for unparsable replies.
+    tasks = {
+        "validation": (validation, submission_metrics, submission_fallback),
+        "editor": (editor_items(articles, config["editor_sample"], seed), editor_metrics, fallback),
+        "film_reviews": (film_review_items(articles), editor_metrics, fallback),
+        "submissions": (submission_items(submissions_all, config["submission_sample"], seed), submission_metrics,
+                        submission_fallback),
+    }
 
     spec = config["model"]
     tokenizer = AutoTokenizer.from_pretrained(spec["id"], revision=spec["revision"])
@@ -116,29 +171,22 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_i
 
     def prompt_ids(row: dict) -> list:
         rendered = tokenizer.apply_chat_template(
-            [{"role": "user", "content": editor_prompt(row, chars)}], tokenize=False, add_generation_prompt=True,
-            enable_thinking=False, strftime_now=fixed_strftime(utc_day(row["skapad"])))
+            [{"role": "user", "content": editor_prompt(row, chars, reasoning)}], tokenize=False,
+            add_generation_prompt=True, enable_thinking=False, strftime_now=fixed_strftime(utc_day(row["skapad"])))
         return tokenizer(rendered, add_special_tokens=False).input_ids
 
     def predict_one(row: dict):
         ids = torch.tensor([prompt_ids(row)], device=model.device)
         with torch.inference_mode():
-            out = model.generate(ids, max_new_tokens=GENERATION_TOKENS, do_sample=False,
+            out = model.generate(ids, max_new_tokens=config["generation_tokens"], do_sample=False,
                                  pad_token_id=tokenizer.eos_token_id)
         return parse_scores(tokenizer.decode(out[0, ids.shape[-1]:], skip_special_tokens=True))
 
-    def evaluate() -> dict:
+    def evaluate(names: list) -> dict:
         model.eval()
-        preds = {key: progress.run(rows, predict_one) for key, rows in eval_sets}
-        return {
-            "predictions": preds,
-            "metrics": {
-                "validation": submission_metrics(validation, preds["validation"], submission_fallback),
-                "editor": editor_metrics(editor, preds["editor"], fallback),
-                "film_reviews": editor_metrics(films, preds["film_reviews"], fallback),
-                "submissions": submission_metrics(submissions, preds["submissions"], submission_fallback),
-            },
-        }
+        preds = {name: progress.run(tasks[name][0], predict_one) for name in names}
+        return {"predictions": preds,
+                "metrics": {name: tasks[name][1](tasks[name][0], preds[name], tasks[name][2]) for name in names}}
 
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     lora = config["lora"]
@@ -149,7 +197,8 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_i
             param.data = param.data.float()  # fp32 adapter weights, so the fp16 grad scaler can unscale them
 
     end = tokenizer.convert_tokens_to_ids("<|im_end|>")
-    encoded = [encode_example(prompt_ids(r), tokenizer(target_text(r), add_special_tokens=False).input_ids + [end],
+    encoded = [encode_example(prompt_ids(r), tokenizer(target_text(r, reasoning, config["max_reasoning_chars"]),
+                                                       add_special_tokens=False).input_ids + [end],
                               config["max_seq_tokens"]) for r in examples]
     too_long = sum(e is None for e in encoded)
     encoded = [e for e in encoded if e is not None]
@@ -157,20 +206,16 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_i
     total = config["epochs"] * -(-len(encoded) // config["grad_accum"])
 
     # Progress phases, known up front: base evaluation, training steps, tuned evaluation.
-    eval_sets = [("validation", validation), ("editor", editor), ("film_reviews", films), ("submissions", submissions)]
-
-    def evaluation_phases(tag: str) -> list:
-        return [(f"{tag} evaluation: {key}", len(rows), "evaluation") for key, rows in eval_sets]
-    progress = Progress((evaluation_phases("base") if config["evaluate_base"] else [])
-                        + [("training steps", total, "training")] + evaluation_phases("tuned"), run_id)
+    base_names, tuned_names = config["base_eval_tasks"], config["tuned_eval_tasks"]
+    progress = Progress([(f"base evaluation: {n}", len(tasks[n][0]), "evaluation") for n in base_names]
+                        + [("training steps", total, "training")]
+                        + [(f"tuned evaluation: {n}", len(tasks[n][0]), "evaluation") for n in tuned_names], run_id)
     results = {"counts": {"train_rows": len(train_rows), "train_examples": len(examples),
-                          "train_examples_too_long": too_long,
+                          "train_examples_too_long": too_long, "held_weight": weight,
                           "train_held_rows": sum(r["beslut"] != "publicera" for r in train_rows),
-                          "validation_items": len(validation), "editor_items": len(editor),
-                          "film_review_items": len(films), "submission_items": len(submissions)}}
-    if config["evaluate_base"]:
-        with model.disable_adapter():
-            base = evaluate()
+                          **{f"{name}_items": len(items) for name, (items, _, _) in tasks.items()}}}
+    with model.disable_adapter():
+        base = evaluate(base_names)
 
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=config["learning_rate"])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: max(0.0, 1 - step / max(1, total)))
@@ -200,27 +245,25 @@ def run(config: dict, data_dir: Path, test_from: str, torch, output: Path, run_i
                 progress.tick(step)
     # The adapter stays in the private Kaggle output; the public workflow artifact uploads JSON and logs only.
     model.save_pretrained(output.parent / "editor-adapter")
-    tuned = evaluate()
+    tuned = evaluate(tuned_names)
 
+    samples = config["bootstrap_samples"]
     results["training"] = {"steps": step, "loss_first_50": sum(losses[:50]) / max(1, len(losses[:50])),
                            "loss_last_50": sum(losses[-50:]) / max(1, len(losses[-50:]))}
+    results["phase_seconds"] = progress.durations()
+    results["base"] = base["metrics"]
     results["tuned"] = tuned["metrics"]
-    results["tuned_predictions"] = {k: [{"id": r["id"], "scores": p} for r, p in zip(rows, tuned["predictions"][k])]
-                                    for k, rows in (("validation", validation), ("editor", editor),
-                                                    ("film_reviews", films), ("submissions", submissions))}
-    if config["evaluate_base"]:
-        results["base"] = base["metrics"]
-        samples = config["bootstrap_samples"]
-        results["tuned_minus_base"] = {
-            "validation": compare(validation, base["predictions"]["validation"], tuned["predictions"]["validation"],
-                                  submission_fallback, samples, seed),
-            "editor": compare(editor, base["predictions"]["editor"], tuned["predictions"]["editor"], fallback,
-                              samples, seed),
-            "film_reviews": compare(films, base["predictions"]["film_reviews"], tuned["predictions"]["film_reviews"],
-                                    fallback, samples, seed),
-            "submissions": compare(submissions, base["predictions"]["submissions"],
-                                   tuned["predictions"]["submissions"], submission_fallback, samples, seed),
-        }
+    # The release bar: an always-the-training-mean answer scores well on MAE when the editor's scores barely vary,
+    # so the tuned model is compared with it as well as with the untuned base.
+    results["train_mean"] = {n: tasks[n][1](tasks[n][0], [None] * len(tasks[n][0]), tasks[n][2]) for n in tuned_names}
+    results["tuned_predictions"] = {
+        n: [{"id": r["id"], "scores": p} for r, p in zip(tasks[n][0], tuned["predictions"][n])] for n in tuned_names}
+    results["tuned_minus_base"] = {
+        n: compare(tasks[n][0], base["predictions"][n], tuned["predictions"][n], tasks[n][2], samples, seed)
+        for n in base_names if n in tuned_names}
+    results["tuned_minus_train_mean"] = {
+        n: compare(tasks[n][0], [None] * len(tasks[n][0]), tuned["predictions"][n], tasks[n][2], samples, seed)
+        for n in tuned_names}
     return results
 
 
@@ -246,7 +289,7 @@ def main() -> None:
     results |= run(config, data_dir, frozen["test_from"], torch, args.output, args.run_id)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(json.dumps({k: results[k] for k in ("counts", "training", "tuned_minus_base") if k in results}, indent=2))
+    print(json.dumps({k: results[k] for k in ("counts", "training", "phase_seconds") if k in results}, indent=2))
 
 
 if __name__ == "__main__":

@@ -72,10 +72,14 @@ Needs the Kaggle secrets above, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_K
 The manual **AI Model Training (Kaggle GPU)** workflow fine-tunes Qwen3-4B as the AI editor with QLoRA (4-bit base, LoRA adapter) on a Kaggle T4. It runs `scripts/train_editor.py` with `configs/train_editor.json`.
 
 - **Training data:** training-split AI-agent submissions only, never test rows. The last `validation_days` before the test window are held out as validation for tuning.
-- **Weighting:** submissions the editor did not publish are rare in training (48 of about 1,590), so each is repeated `held_weight` times, next to a seeded sample of `train_published_sample` published ones.
-- **Loss:** on the four-score JSON answer only, with the same prompt and chat template as the evaluation.
-- **Evaluation:** the untuned 4-bit base (adapter disabled) and the tuned model are scored on validation and on the frozen test tasks (editor articles, film reviews, submissions). The MAE difference per score gets a paired 95% bootstrap interval.
+- **Weighting:** submissions the editor did not publish are rare in training (37 of 1,332 before the validation days), so each is repeated until they make up `held_share` (50%) of the examples, next to a seeded sample of `train_published_sample` published ones.
+- **Answer and loss:** with `reasoning` on, the answer is the editor's own justification (`motivering`, shortened to `max_reasoning_chars` at a sentence end) followed by the four scores, so the model has to learn why a text gets its scores; the first run, scores only, collapsed to one constant answer. The loss covers the answer only, with the same prompt and chat template as the evaluation.
+- **Evaluation:** the untuned 4-bit base (adapter disabled) on `base_eval_tasks` and the tuned model on `tuned_eval_tasks` (validation and the frozen test tasks), both with the reasoned prompt. The tuned model is compared with the base and with an always-the-training-mean answer; each MAE difference gets a paired 95% bootstrap interval. The results also record minutes per phase, to plan the next run's time budget.
 - **Privacy:** the adapter stays in the private Kaggle output. The public workflow artifact holds JSON and logs only; predictions are parsed scores, never raw replies.
+
+### When a run outlives its GitHub job
+
+Time in Kaggle's queue counts against the GitHub job's 6-hour limit, but not against the Kaggle run. If the job is cancelled while Kaggle keeps going, start **AI Model Training (Kaggle GPU)** again with `retrieve_run` (the earlier run's id and attempt, such as `39147257612-1`) and `retrieve_sha` (the commit it trained). It pushes nothing: it waits for the kernel to finish, downloads its result, checks that the provenance matches that run and commit, and writes the usual summary.
 
 ### Progress while a run is going
 

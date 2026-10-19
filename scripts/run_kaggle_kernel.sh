@@ -9,23 +9,31 @@ kernel_timeout="${KAGGLE_KERNEL_TIMEOUT:-5700}"
 max_polls="${KAGGLE_MAX_POLLS:-100}"
 : "${GITHUB_SHA:?GITHUB_SHA must be set}"
 : "${EXPERIMENT_RUN_ID:?EXPERIMENT_RUN_ID must be set}"
+# The commit the result must come from: this run's, or an earlier run's when only retrieving its result.
+expected_sha="${EXPECTED_SHA:-$GITHUB_SHA}"
+retrieve_only="${KAGGLE_RETRIEVE_ONLY:-false}"
 mkdir -p kaggle-results
 
 # CLI versions can print "Kernel push error" yet return exit status 0.
 # Fail closed unless the CLI explicitly confirms a successful new version.
-if ! kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 --timeout "$kernel_timeout" > kaggle-results/submission.log 2>&1; then
+# Retrieval pushes nothing: it waits for the kernel's latest version and checks its provenance below.
+if [ "$retrieve_only" = "true" ]; then
+  echo "Retrieving the result of run $EXPERIMENT_RUN_ID (commit $expected_sha) without a new push"
+elif ! kaggle kernels push -p kaggle-submission --accelerator NvidiaTeslaT4 --timeout "$kernel_timeout" > kaggle-results/submission.log 2>&1; then
   cat kaggle-results/submission.log
   echo "::error::Kaggle submission command failed"
   exit 1
 fi
-cat kaggle-results/submission.log
-if grep -Eiq '^[[:space:]]*(kernel push error|error pushing|failed:|traceback)' kaggle-results/submission.log; then
-  echo "::error::Kaggle rejected the submission"
-  exit 1
-fi
-if ! grep -Eiq 'kernel version [0-9]+ successfully pushed|kernel version [0-9]+ pushed' kaggle-results/submission.log; then
-  echo "::error::Kaggle submission did not confirm a new kernel version"
-  exit 1
+if [ "$retrieve_only" != "true" ]; then
+  cat kaggle-results/submission.log
+  if grep -Eiq '^[[:space:]]*(kernel push error|error pushing|failed:|traceback)' kaggle-results/submission.log; then
+    echo "::error::Kaggle rejected the submission"
+    exit 1
+  fi
+  if ! grep -Eiq 'kernel version [0-9]+ successfully pushed|kernel version [0-9]+ pushed' kaggle-results/submission.log; then
+    echo "::error::Kaggle submission did not confirm a new kernel version"
+    exit 1
+  fi
 fi
 
 # The live stream replays the running session from its start, so a short time-boxed attach yields its newest
@@ -91,7 +99,7 @@ kaggle kernels output "$kernel" -p kaggle-results --force > kaggle-results/outpu
 
 # Provenance is written by the remote runner AFTER the model test succeeds.
 # A stale result from a previous Kaggle kernel version must be rejected.
-python - "$GITHUB_SHA" "$EXPERIMENT_RUN_ID" "$result_file" <<'PY'
+python - "$expected_sha" "$EXPERIMENT_RUN_ID" "$result_file" <<'PY'
 import json
 import sys
 from pathlib import Path
