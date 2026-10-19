@@ -77,6 +77,10 @@ The manual **AI Model Training (Kaggle GPU)** workflow fine-tunes Qwen3-4B as th
 - **Evaluation:** the untuned 4-bit base (adapter disabled) on `base_eval_tasks` and the tuned model on `tuned_eval_tasks` (validation and the frozen test tasks), both with the reasoned prompt. The tuned model is compared with the base and with an always-the-training-mean answer; each MAE difference gets a paired 95% bootstrap interval. The results also record minutes per phase, to plan the next run's time budget.
 - **Privacy:** the adapter stays in the private Kaggle output. The public workflow artifact holds JSON and logs only; predictions are parsed scores, never raw replies.
 
+### When a run outlives its GitHub job
+
+Time in Kaggle's queue counts against the GitHub job's 6-hour limit, but not against the Kaggle run. If the job is cancelled while Kaggle keeps going, start **AI Model Training (Kaggle GPU)** again with `retrieve_run` (the earlier run's id and attempt, such as `39147257612-1`) and `retrieve_sha` (the commit it trained). It pushes nothing: it waits for the kernel to finish, downloads its result, checks that the provenance matches that run and commit, and writes the usual summary.
+
 ### Progress while a run is going
 
 While a Kaggle run is running, the workflow log shows its latest progress line after each status check, for example:
